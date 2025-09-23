@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Casino en Ligne - Saé502</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" type="image/x-icon" href="images/favicon.ico">
+</head>
+<body>
+    <!-- Header avec navigation -->
+    <header class="header">
+        <div class="container">
+            <div class="logo">
+                <h1>🎰 Casino Online</h1>
+            </div>
+            <nav class="nav">
+                <div id="auth-section" class="auth-section">
+                    <!-- Section authentification (sera remplie par JS) -->
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Contenu principal -->
+    <main class="main">
+        <div class="container">
+            <!-- Section de connexion/inscription -->
+            <section id="login-section" class="login-section">
+                <div class="auth-container">
+                    <div class="auth-tabs">
+                        <button id="login-tab" class="tab-button active">Connexion</button>
+                        <button id="register-tab" class="tab-button">Inscription</button>
+                    </div>
+
+                    <!-- Formulaire de connexion -->
+                    <form id="login-form" class="auth-form">
+                        <h2>Connexion</h2>
+                        <div class="form-group">
+                            <label for="login-username">Nom d'utilisateur:</label>
+                            <input type="text" id="login-username" name="username" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="login-password">Mot de passe:</label>
+                            <input type="password" id="login-password" name="password" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Se connecter</button>
+                    </form>
+
+                    <!-- Formulaire d'inscription -->
+                    <form id="register-form" class="auth-form hidden">
+                        <h2>Inscription</h2>
+                        <div class="form-group">
+                            <label for="register-username">Nom d'utilisateur:</label>
+                            <input type="text" id="register-username" name="username" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="register-email">Email:</label>
+                            <input type="email" id="register-email" name="email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="register-password">Mot de passe:</label>
+                            <input type="password" id="register-password" name="password" required minlength="6">
+                        </div>
+                        <button type="submit" class="btn btn-primary">S'inscrire</button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Section des jeux (masquée au début) -->
+            <section id="games-section" class="games-section hidden">
+                <div class="user-info">
+                    <div class="credits">
+                        <span class="credits-label">Crédits:</span>
+                        <span id="user-credits" class="credits-amount">0</span>
+                        <span class="credits-currency">€</span>
+                    </div>
+                    <div class="user-name">
+                        Bienvenue, <span id="user-name">Utilisateur</span>!
+                    </div>
+                </div>
+
+                <div class="games-grid">
+                    <!-- Machine à sous -->
+                    <div class="game-card" data-game="slots">
+                        <div class="game-icon">🎰</div>
+                        <h3>Machine à Sous</h3>
+                        <p>Tentez votre chance aux machines à sous!</p>
+                        <button class="btn btn-game">Jouer</button>
+                    </div>
+
+                    <!-- Roulette -->
+                    <div class="game-card" data-game="roulette">
+                        <div class="game-icon">🎡</div>
+                        <h3>Roulette</h3>
+                        <p>Misez sur les numéros et couleurs!</p>
+                        <button class="btn btn-game">Jouer</button>
+                    </div>
+
+                    <!-- Courses -->
+                    <div class="game-card" data-game="races">
+                        <div class="game-icon">🏇</div>
+                        <h3>Courses</h3>
+                        <p>Pariez sur votre cheval favori!</p>
+                        <button class="btn btn-game">Jouer</button>
+                    </div>
+                </div>
+
+                <!-- Zone de jeu (sera remplie dynamiquement) -->
+                <div id="game-area" class="game-area hidden">
+                    <!-- Le contenu du jeu sera inséré ici -->
+                </div>
+
+                <!-- Historique des parties -->
+                <div class="game-history">
+                    <h3>Historique des parties</h3>
+                    <div id="history-list" class="history-list">
+                        <!-- L'historique sera chargé ici -->
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Messages d'alerte -->
+    <div id="alert-container" class="alert-container"></div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2024 Casino Online - Projet Saé502 BUT R&T</p>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/games.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
