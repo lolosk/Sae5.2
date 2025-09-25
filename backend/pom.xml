@@ -23,6 +23,13 @@
             <scope>provided</scope>
         </dependency>
 
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.45.1.0</version>
+        </dependency>
+
+
         <!-- JDBC PostgreSQL -->
         <dependency>
             <groupId>org.postgresql</groupId>
@@ -38,6 +45,7 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
 
     <build>
         <finalName>casino-backend</finalName>
