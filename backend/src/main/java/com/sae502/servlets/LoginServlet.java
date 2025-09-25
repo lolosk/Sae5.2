@@ -27,7 +27,11 @@ public class LoginServlet extends HttpServlet {
 
             PrintWriter out = resp.getWriter();
             if (rs.next()) {
-                out.println("<h1>Connexion réussie ! Bienvenue, " + rs.getString("username") + "</h1>");
+                HttpSession session = req.getSession();
+                session.setAttribute("username", username);
+
+                // Rediriger vers le menu
+                resp.sendRedirect("menu");
             } else {
                 out.println("<h1>Échec de connexion (utilisateur/mot de passe)</h1>");
             }
