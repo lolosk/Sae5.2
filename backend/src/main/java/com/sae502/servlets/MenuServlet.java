@@ -45,7 +45,8 @@ public class MenuServlet extends HttpServlet {
         out.println("<meta charset='UTF-8'>");
         out.println("<title>Casino en ligne - Menu</title>");
         out.println("<style>");
-        out.println("body { font-family: Arial, sans-serif; background: radial-gradient(circle at center, #222, #000); color: #fff; margin:0; text-align:center; }");
+        out.println("body { margin:0; font-family: Arial, sans-serif; color:#fff; text-align:center; }");
+        out.println("video.bg-video { position:fixed; right:0; bottom:0; min-width:100%; min-height:100%; z-index:-1; object-fit:cover; }");
         out.println("header { display:flex; justify-content:space-between; align-items:center; padding:15px 30px; background:rgba(0,0,0,0.6); border-bottom:2px solid #ff9800; }");
         out.println(".profile p { margin:0; font-size:14px; }");
         out.println(".menu { display:flex; justify-content:center; flex-wrap:wrap; gap:20px; margin-top:40px; }");
@@ -56,6 +57,12 @@ public class MenuServlet extends HttpServlet {
         out.println("</head>");
         out.println("<body>");
 
+        // 🎬 Vidéo de fond
+        out.println("<video autoplay loop muted playsinline class='bg-video'>");
+        out.println("<source src='background.mp4' type='video/mp4'>");
+        out.println("</video>");
+
+        // En-tête
         out.println("<header>");
         out.println("<div class='logo'><h2>🎰 Casino Online</h2></div>");
         out.println("<div class='profile'>");
@@ -64,6 +71,7 @@ public class MenuServlet extends HttpServlet {
         out.println("</div>");
         out.println("</header>");
 
+        // Menu des jeux
         out.println("<h1>Menu Principal</h1>");
         out.println("<div class='menu'>");
         out.println("<div class='game-card' onclick=\"location.href='slots.html'\">");
