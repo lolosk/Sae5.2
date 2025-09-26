@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>🎰 Casino - Machine à sous</title>
+    <style>
+        body {
+          font-family: Arial, sans-serif;
+          background: radial-gradient(circle, #111, #333);
+          color: #fff;
+          text-align: center;
+        }
+
+        h1 {
+          margin-top: 20px;
+          color: #ff9800;
+          text-shadow: 0 0 8px #ff9800;
+        }
+
+        .slots {
+          position: relative;
+          width: 260px;
+          height: 240px;
+          margin: 40px auto;
+          display: flex;
+          justify-content: space-between;
+          padding: 15px;
+          background: linear-gradient(45deg, grey 0%, lightgray 100%);
+          border-radius: 6px;
+          box-shadow: -2px 2px 5px rgba(0,0,0,0.4);
+        }
+
+        .slots .reel {
+          width: 79px;
+          height: 237px;
+          border: 1px solid rgba(0,0,0,0.3);
+          border-radius: 4px;
+          overflow: hidden;
+          background-image: url("https://assets.codepen.io/439000/slotreel.webp");
+          background-repeat: repeat-y;
+          background-position-y: 0;
+        }
+
+        .bet-buttons {
+          margin: 20px 0;
+        }
+
+        .bet-buttons button {
+          font-size: 16px;
+          margin: 5px;
+          padding: 10px 20px;
+          border: none;
+          border-radius: 6px;
+          background: #ff9800;
+          cursor: pointer;
+        }
+
+        .bet-buttons button:hover {
+          background: #ffa733;
+        }
+
+        #result {
+          margin-top: 20px;
+          font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+<h1>🎰 Machine à sous</h1>
+
+<div class="slots">
+    <div class="reel" id="reel1"></div>
+    <div class="reel" id="reel2"></div>
+    <div class="reel" id="reel3"></div>
+</div>
+
+<div class="bet-buttons">
+    <button onclick="spin(5)">Miser 5</button>
+    <button onclick="spin(50)">Miser 50</button>
+    <button onclick="spin(500)">Miser 500</button>
+</div>
+
+<p id="result"></p>
+
+<script>
+    // Hauteur d’une icône dans le sprite (79px sur le CodePen)
+    const iconHeight = 79;
+    const icons = ["banana","seven","cherry","plum","orange","bell","bar","lemon","melon"];
+    const numIcons = icons.length;
+
+    // Map emojis (backend) -> noms du sprite (frontend)
+    const symbolMap = {
+      "7️⃣": "seven",
+      "🍌": "banana",
+      "🍉": "melon"
+      "🍋": "lemon",
+      "🟥": "bar",
+      "🔔": "bell",
+      "🍊": "orange",
+      "🍑": "plum",
+      "🍒": "cherry",
+    };
+
+    // Références DOM
+    const reelEls = [
+      document.getElementById("reel1"),
+      document.getElementById("reel2"),
+      document.getElementById("reel3")
+    ];
+
+    // État courant : index du symbole "en haut" (top) pour chaque rouleau (0..8)
+    // On gère NOUS-MÊMES la position (sans relire le CSS), pour ne pas dériver.
+    const reelTopIndex = [0, 0, 0];
+
+    // Init visuelle (position de fond à 0)
+    reelEls.forEach(r => {
+      r.style.backgroundRepeat = "repeat-y";
+      r.style.backgroundPositionY = "0px";
+      r.style.transition = "none";
+    });
+
+    let spinning = false; // anti double-click
+
+    // Fait tourner UN rouleau jusqu’au symbole final, avec quelques tours
+    // reelIdx : 0,1,2    finalEmoji : "🍒" ...    delayIdx : 0,1,2 (pour durée/décalage)
+    function rollTo(reelIdx, finalEmoji, delayIdx) {
+      return new Promise(resolve => {
+        const reel = reelEls[reelIdx];
+
+        // Nom du sprite à viser + index dans le sprite
+        const targetName = symbolMap[finalEmoji] || "cherry";
+        const targetIndex = icons.indexOf(targetName);
+        if (targetIndex < 0) {
+          console.warn("Symbole inconnu, fallback cherry:", finalEmoji);
+        }
+
+        // On veut le symbole FINAL **AU CENTRE** de la fenêtre.
+        // La fenêtre affiche 3 tuiles : top, center (= top+1), bottom (= top+2).
+        // Donc pour voir 'target' au centre, le "top" doit être (target - 1).
+        const targetTopIndex = ( (targetIndex - 1) + numIcons ) % numIcons;
+
+        // Combien de pas entre la position actuelle (top) et la cible (top) ?
+        const currentTop = reelTopIndex[reelIdx];
+        const deltaSteps = ( (targetTopIndex - currentTop) + numIcons ) % numIcons;
+
+        // On ajoute des tours complets pour l’effet (3 tours + décalage par rouleau)
+        const extraTurns = 3 + delayIdx; // 3,4,5 tours respectivement
+        const totalSteps = extraTurns * numIcons + deltaSteps;
+
+        // De -> À (en pixels)
+        const fromPx = currentTop * iconHeight;
+        const toPx   = fromPx + totalSteps * iconHeight;
+
+        // Durée/rythme : légerement plus long pour les rouleaux suivants
+        const durationMs = 900 + delayIdx * 350;
+
+        // Lance l’anim (prochaine frame pour que le browser prenne bien la transition)
+        requestAnimationFrame(() => {
+          reel.style.transition = `background-position-y ${durationMs}ms cubic-bezier(.41,-0.01,.63,1.09)`;
+          reel.style.backgroundPositionY = `${toPx}px`;
+        });
+
+        // À la fin : on normalise et on fige exactement sur la tuile cible
+        setTimeout(() => {
+          reel.style.transition = "none";
+          const normalized = (targetTopIndex * iconHeight) % (numIcons * iconHeight);
+          reel.style.backgroundPositionY = `${normalized}px`;
+          reelTopIndex[reelIdx] = targetTopIndex;  // ✅ On mémorise l’état exact
+          resolve();
+        }, durationMs + 30);
+      });
+    }
+
+    function spin(bet) {
+      if (spinning) return;
+      spinning = true;
+      document.getElementById("result").textContent = "Les rouleaux tournent...";
+
+      fetch("/casino-backend/slots", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "bet=" + encodeURIComponent(bet)
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          spinning = false;
+          document.getElementById("result").textContent = "❌ " + data.error;
+          return;
+        }
+
+        // data.symbols = ["🍒","🍋","7️⃣"] par ex.
+        Promise.all([
+          rollTo(0, data.symbols[0], 0),
+          rollTo(1, data.symbols[1], 1),
+          rollTo(2, data.symbols[2], 2),
+        ]).then(() => {
+          document.getElementById("result").textContent =
+            "✅ Gain: " + data.gain + " | Crédits restants: " + data.newCredits;
+          spinning = false;
+        });
+      })
+      .catch(err => {
+        spinning = false;
+        document.getElementById("result").textContent = "❌ Erreur réseau : " + err;
+      });
+    }
+</script>
+
+</body>
+</html>

@@ -66,7 +66,7 @@ public class MenuServlet extends HttpServlet {
 
         out.println("<h1>Menu Principal</h1>");
         out.println("<div class='menu'>");
-        out.println("<div class='game-card' onclick=\"location.href='slots'\">");
+        out.println("<div class='game-card' onclick=\"location.href='slots.html'\">");
         out.println("<h2>🎰 Machine à sous</h2><p>Tente ta chance avec 3 symboles !</p></div>");
         out.println("<div class='game-card' onclick=\"location.href='roulette'\">");
         out.println("<h2>🎡 Roulette</h2><p>Parie sur le bon numéro.</p></div>");
