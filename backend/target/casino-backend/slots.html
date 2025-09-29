@@ -13,8 +13,6 @@
             text-align: center;
         }
 
-
-
         h1 {
           margin-top: 20px;
           color: #ff9800;
@@ -23,19 +21,16 @@
 
         .slots {
             position: absolute;
-            top: 50%;       /* centre vertical */
-            left: 50%;      /* centre horizontal */
-            transform: translate(-49%, -50%); /* ajuste pour vraiment centrer */
+            top: 50%;
+            left: 50%;
+            transform: translate(-49%, -50%);
             width: 342px;
             height: 200px;
             display: flex;
             justify-content: space-between;
             padding: 0px;
-
             border-radius: 0px;
-
-}
-
+        }
 
         .slots .reel {
           width: 79px;
@@ -46,22 +41,55 @@
           background-position-y: 0;
         }
 
+        /* --- Boutons de mise --- */
         .bet-buttons {
-          margin: 20px 0;
+          margin-top: 574px; /* décale sous la machine */
+          display: flex;
+          justify-content: center;
+          gap: 15px;
         }
 
         .bet-buttons button {
           font-size: 16px;
-          margin: 5px;
-          padding: 10px 20px;
-          border: none;
-          border-radius: 6px;
-          background: #ff9800;
+          padding: 1px 20px;
+          border: 2px solid #ff9800;
+          border-radius: 8px;
+          background: rgba(0,0,0,0.5);
+          color: #ff9800;
           cursor: pointer;
+          transition: 0.2s;
+        }
+
+        .bet-buttons button.active {
+          background: #ff9800;
+          color: #000;
+          transform: scale(1.1);
         }
 
         .bet-buttons button:hover {
           background: #ffa733;
+          color: #000;
+        }
+
+        /* --- Buzzer Spin --- */
+        .spin-btn {
+          margin-top: 20px;
+          width: 255px;
+          height: 130px;
+          border-radius: 50%;
+          border: none;
+          background: radial-gradient(circle at center, #ff0000, #aa0000);
+          box-shadow: 0 0 15px rgba(255,0,0,0.6), inset 0 0 10px rgba(0,0,0,0.7);
+          color: #fff;
+          font-size: 70px;
+          font-weight: bold;
+          cursor: pointer;
+          transition: transform 0.1s;
+        }
+
+        .spin-btn:active {
+          transform: scale(0.9);
+          box-shadow: 0 0 25px rgba(255,0,0,0.9), inset 0 0 15px rgba(0,0,0,0.9);
         }
 
         #result {
@@ -71,7 +99,6 @@
     </style>
 </head>
 <body>
-<h1>🎰 Machine à sous</h1>
 
 <div class="slots">
     <div class="reel" id="reel1"></div>
@@ -79,31 +106,23 @@
     <div class="reel" id="reel3"></div>
 </div>
 
+<!-- Boutons de mise -->
 <div class="bet-buttons">
-    <button onclick="spin(5)">Miser 5</button>
-    <button onclick="spin(50)">Miser 50</button>
-    <button onclick="spin(500)">Miser 500</button>
+    <button onclick="selectBet(5)">Miser 5</button>
+    <button onclick="selectBet(50)">Miser 50</button>
+    <button onclick="selectBet(500)">Miser 500</button>
 </div>
+
+<!-- Buzzer Spin -->
+<button class="spin-btn" onclick="startSpin()">SPIN</button>
 
 <p id="result"></p>
 
 <script>
-    // Hauteur d’une icône dans le sprite (79px sur le CodePen)
     const iconHeight = 79;
-    const icons = [
-          "seven",   // 7️⃣
-          "banana",  // 🍌
-          "melon",   // 🍉
-          "lemon",   // 🍋
-          "bar",     // 🟥
-          "bell",    // 🔔
-          "orange",  // 🍊
-          "plum",    // 🍑
-          "cherry"   // 🍒
-    ];
+    const icons = ["seven","banana","melon","lemon","bar","bell","orange","plum","cherry"];
     const numIcons = icons.length;
 
-    // Map emojis (backend) -> noms du sprite (frontend)
     const symbolMap = {
       "7️⃣": "seven",
       "🍌": "banana",
@@ -116,71 +135,61 @@
       "🍒": "cherry",
     };
 
-    // Références DOM
     const reelEls = [
       document.getElementById("reel1"),
       document.getElementById("reel2"),
       document.getElementById("reel3")
     ];
 
-    // État courant : index du symbole "en haut" (top) pour chaque rouleau (0..8)
-    // On gère NOUS-MÊMES la position (sans relire le CSS), pour ne pas dériver.
-    const reelTopIndex = [0, 0, 0];
-
-    // Init visuelle (position de fond à 0)
+    const reelTopIndex = [0,0,0];
     reelEls.forEach(r => {
       r.style.backgroundRepeat = "repeat-y";
       r.style.backgroundPositionY = "0px";
       r.style.transition = "none";
     });
 
-    let spinning = false; // anti double-click
+    let spinning = false;
+    let currentBet = 5; // mise par défaut
 
-    // Fait tourner UN rouleau jusqu’au symbole final, avec quelques tours
-    // reelIdx : 0,1,2    finalEmoji : "🍒" ...    delayIdx : 0,1,2 (pour durée/décalage)
+    function selectBet(amount) {
+      currentBet = amount;
+      document.querySelectorAll(".bet-buttons button").forEach(btn => btn.classList.remove("active"));
+      event.target.classList.add("active");
+    }
+
+    function startSpin() {
+      if (spinning) return;
+      spin(currentBet);
+    }
+
     function rollTo(reelIdx, finalEmoji, delayIdx) {
       return new Promise(resolve => {
         const reel = reelEls[reelIdx];
-
-        // Nom du sprite à viser + index dans le sprite
         const targetName = symbolMap[finalEmoji] || "cherry";
         const targetIndex = icons.indexOf(targetName);
-        if (targetIndex < 0) {
-          console.warn("Symbole inconnu, fallback cherry:", finalEmoji);
-        }
 
-        // On veut le symbole FINAL **AU CENTRE** de la fenêtre.
-        // La fenêtre affiche 3 tuiles : top, center (= top+1), bottom (= top+2).
-        // Donc pour voir 'target' au centre, le "top" doit être (target - 1).
-        const targetTopIndex = ( (targetIndex - 1) + numIcons ) % numIcons;
-
-        // Combien de pas entre la position actuelle (top) et la cible (top) ?
+        const targetTopIndex = ((targetIndex - 1) + numIcons) % numIcons;
         const currentTop = reelTopIndex[reelIdx];
-        const deltaSteps = ( (targetTopIndex - currentTop) + numIcons ) % numIcons;
+        const deltaSteps = ((targetTopIndex - currentTop) + numIcons) % numIcons;
 
-        // On ajoute des tours complets pour l’effet (3 tours + décalage par rouleau)
-        const extraTurns = 3 + delayIdx; // 3,4,5 tours respectivement
+        const extraTurns = 3 + delayIdx;
         const totalSteps = extraTurns * numIcons + deltaSteps;
 
-        // De -> À (en pixels)
         const fromPx = currentTop * iconHeight;
         const toPx   = fromPx + totalSteps * iconHeight;
 
-        // Durée/rythme : légerement plus long pour les rouleaux suivants
         const durationMs = 900 + delayIdx * 350;
 
-        // Lance l’anim (prochaine frame pour que le browser prenne bien la transition)
         requestAnimationFrame(() => {
           reel.style.transition = `background-position-y ${durationMs}ms cubic-bezier(.41,-0.01,.63,1.09)`;
           reel.style.backgroundPositionY = `${toPx}px`;
         });
 
-        // À la fin : on normalise et on fige exactement sur la tuile cible
         setTimeout(() => {
           reel.style.transition = "none";
           const normalized = (targetTopIndex * iconHeight) % (numIcons * iconHeight);
           reel.style.backgroundPositionY = `${normalized}px`;
-          reelTopIndex[reelIdx] = targetTopIndex;  // ✅ On mémorise l’état exact
+          reelTopIndex[reelIdx] = targetTopIndex;
           resolve();
         }, durationMs + 30);
       });
@@ -204,7 +213,6 @@
           return;
         }
 
-        // data.symbols = ["🍒","🍋","7️⃣"] par ex.
         Promise.all([
           rollTo(0, data.symbols[0], 0),
           rollTo(1, data.symbols[1], 1),
@@ -220,6 +228,11 @@
         document.getElementById("result").textContent = "❌ Erreur réseau : " + err;
       });
     }
+
+    // Active la mise 5 par défaut
+    document.addEventListener("DOMContentLoaded", () => {
+      document.querySelector(".bet-buttons button").classList.add("active");
+    });
 </script>
 
 </body>
