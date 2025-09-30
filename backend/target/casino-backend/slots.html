@@ -13,10 +13,60 @@
             text-align: center;
         }
 
+        .top-info {
+            position: absolute;
+            top: 52px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 40px;
+
+            padding: 10px 10px;
+
+        }
+
+        #balance {
+            font-size: 20px;
+            font-weight: bold;
+            color: #00e676;
+
+            margin: 0;
+        }
+
+        #spinResult {
+          font-size: 22px;
+          font-weight: bold;
+          color: #000 !important; /* forcé en noir */
+          padding: 5px 15px;
+          margin: 0;
+        }
+
+
+
+
+        /* --- je le garde si je veux mettre un titre --- */
         h1 {
           margin-top: 20px;
           color: #ff9800;
           text-shadow: 0 0 8px #ff9800;
+        }
+
+        /* --- Balance & Résultat --- */
+        #balance {
+          margin-top: 10px;
+          font-size: 22px;
+          font-weight: bold;
+          color: #00e676;
+          text-shadow: 0 0 6px #00ff94;
+        }
+
+        #spinResult {
+          margin-top: 10px;
+          font-size: 18px;
+          color: #ffeb3b;
+          text-shadow: 0 0 5px #ffeb3b;
         }
 
         .slots {
@@ -92,13 +142,17 @@
           box-shadow: 0 0 25px rgba(255,0,0,0.9), inset 0 0 15px rgba(0,0,0,0.9);
         }
 
-        #result {
-          margin-top: 20px;
-          font-size: 18px;
-        }
+
     </style>
 </head>
 <body>
+
+<!-- Balance & Résultat -->
+<div class="top-info">
+    <p id="balance">💰</p>
+    <p id="spinResult"></p>
+</div>
+
 
 <div class="slots">
     <div class="reel" id="reel1"></div>
@@ -116,7 +170,15 @@
 <!-- Buzzer Spin -->
 <button class="spin-btn" onclick="startSpin()">SPIN</button>
 
-<p id="result"></p>
+<audio id="bgMusic" src="sounds/background.mp3" loop></audio>
+<audio id="reelStopSound" src="sounds/reel-stop.wav"></audio>
+<audio id="winSound" src="sounds/win.mp3"></audio>
+<audio id="loseSound" src="sounds/lose.mp3"></audio>
+
+<!-- Bouton pour activer/désactiver la musique -->
+<button id="toggleMusic">🎵 Musique ON/OFF</button>
+
+
 
 <script>
     const iconHeight = 79;
@@ -149,7 +211,8 @@
     });
 
     let spinning = false;
-    let currentBet = 5; // mise par défaut
+    let currentBet = 5;     // mise par défaut
+    let currentBalance = 0; // sera synchronisé avec le serveur
 
     function selectBet(amount) {
       currentBet = amount;
@@ -190,6 +253,9 @@
           const normalized = (targetTopIndex * iconHeight) % (numIcons * iconHeight);
           reel.style.backgroundPositionY = `${normalized}px`;
           reelTopIndex[reelIdx] = targetTopIndex;
+
+          playReelStop(); // 🔊 son à l’arrêt du rouleau
+
           resolve();
         }, durationMs + 30);
       });
@@ -198,7 +264,13 @@
     function spin(bet) {
       if (spinning) return;
       spinning = true;
-      document.getElementById("result").textContent = "Les rouleaux tournent...";
+
+      // 💰 Débit immédiat côté client
+      currentBalance -= bet;
+      document.getElementById("balance").textContent = currentBalance;
+
+      // Message en cours
+      document.getElementById("spinResult").textContent = "🎰 Les rouleaux tournent 🎰";
 
       fetch("/casino-backend/slots", {
         method: "POST",
@@ -209,7 +281,7 @@
       .then(data => {
         if (data.error) {
           spinning = false;
-          document.getElementById("result").textContent = "❌ " + data.error;
+          document.getElementById("spinResult").textContent = "❌ " + data.error;
           return;
         }
 
@@ -218,14 +290,25 @@
           rollTo(1, data.symbols[1], 1),
           rollTo(2, data.symbols[2], 2),
         ]).then(() => {
-          document.getElementById("result").textContent =
-            "✅ Gain: " + data.gain + " | Crédits restants: " + data.newCredits;
+          // ✅ synchronise avec la valeur réelle du serveur
+          currentBalance = data.newCredits;
+          document.getElementById("balance").textContent = currentBalance;
+
+          // ✅ Affiche le résultat avec son associé
+          if (data.gain > 0) {
+            document.getElementById("spinResult").textContent = "Gain: " + data.gain;
+            playWin(); // 🔊 son gain
+          } else {
+            document.getElementById("spinResult").textContent = "💀 Perdu 💀";
+            playLose(); // 🔊 son perte
+          }
+
           spinning = false;
         });
       })
       .catch(err => {
         spinning = false;
-        document.getElementById("result").textContent = "❌ Erreur réseau : " + err;
+        document.getElementById("spinResult").textContent = "❌ Erreur réseau : " + err;
       });
     }
 
@@ -233,7 +316,48 @@
     document.addEventListener("DOMContentLoaded", () => {
       document.querySelector(".bet-buttons button").classList.add("active");
     });
+
+    // === Gestion des sons ===
+    const bgMusic = document.getElementById("bgMusic");
+    bgMusic.volume = 0.1; // volume faible (10%)
+
+    const reelStopSound = document.getElementById("reelStopSound");
+    const winSound = document.getElementById("winSound");
+    const loseSound = document.getElementById("loseSound");
+
+    let musicEnabled = false;
+
+    // Toggle musique
+    document.getElementById("toggleMusic").addEventListener("click", () => {
+      if (musicEnabled) {
+        bgMusic.pause();
+        musicEnabled = false;
+      } else {
+        bgMusic.play();
+        musicEnabled = true;
+      }
+    });
+
+    // 🔊 Joue un son quand un rouleau s'arrête
+    function playReelStop() {
+      reelStopSound.currentTime = 0;
+      reelStopSound.play();
+    }
+
+    // 🔊 Joue le son de gain
+    function playWin() {
+      winSound.currentTime = 0;
+      winSound.play();
+    }
+
+    // 🔊 Joue le son de perte
+    function playLose() {
+      loseSound.currentTime = 0;
+      loseSound.play();
+    }
 </script>
+
+
 
 </body>
 </html>
