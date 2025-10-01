@@ -1,0 +1,113 @@
+/* 🌌 Fond vidéo */
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  color: #fff;
+  text-align: center;
+  overflow: hidden;
+}
+
+video.bg-video {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  min-width: 100%;
+  min-height: 100%;
+  z-index: -1;
+  object-fit: cover;
+}
+
+/* 🔲 Header overlay (utilisateur + crédits) */
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 30px;
+  background: rgba(0, 0, 0, 0.6);
+  border-bottom: 2px solid #ff9800;
+  box-shadow: 0 0 15px rgba(255, 152, 0, 0.6);
+  position: relative;
+  z-index: 2;
+}
+
+header h2 {
+  margin: 0;
+  color: #ff9800;
+  text-shadow: 0 0 8px #00000;
+}
+
+header .profile p {
+  margin: 2px 0;
+  font-size: 15px;
+}
+
+/* 🏠 Titre principal */
+h1 {
+  margin-top: 40px;
+  font-size: 32px;
+  color: #000000;
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0);
+  z-index: 2;
+  position: relative;
+}
+
+/* 🎮 Zone des jeux */
+.menu {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 400px;
+  margin-top: 150px;
+  position: relative;
+  z-index: 2;
+}
+
+.game-card {
+  background: rgba(0, 0, 0, 0.6);
+  border: 2px solid #ff9800;
+  border-radius: 12px;
+  padding: 25px;
+  width: 20em;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.5);
+}
+
+.game-card h2 {
+  margin: 0 0 12px;
+  color: #ff9800;
+}
+
+.game-card p {
+  font-size: 14px;
+  color: #ddd;
+}
+
+/* Effet interactif 🎨 */
+.game-card:hover {
+  transform: scale(1.05);
+  background: rgba(255, 152, 0, 0.15);
+  box-shadow: 0 0 15px rgba(255, 152, 0, 0.7);
+}
+
+/* 🔊 Bouton son */
+.sound-btn {
+  position: fixed;
+  top: 120px;
+  left: 20px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 2px solid #ff9800;
+  border-radius: 50%;
+  font-size: 22px;
+  padding: 10px 14px;
+  color: #ff9800;
+  cursor: pointer;
+  z-index: 3;
+  transition: 0.2s;
+}
+
+.sound-btn:hover {
+  background: rgba(255, 152, 0, 0.2);
+  transform: scale(1.1);
+}
+

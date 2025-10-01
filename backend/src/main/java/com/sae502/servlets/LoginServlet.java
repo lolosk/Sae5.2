@@ -31,7 +31,7 @@ public class LoginServlet extends HttpServlet {
                 session.setAttribute("username", username);
 
                 // Rediriger vers le menu
-                resp.sendRedirect("menu");
+                resp.sendRedirect("menu.html");
             } else {
                 out.println("<h1>Échec de connexion (utilisateur/mot de passe)</h1>");
             }
