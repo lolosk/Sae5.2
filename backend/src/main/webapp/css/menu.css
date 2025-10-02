@@ -4,7 +4,7 @@ body {
   font-family: Arial, sans-serif;
   color: #fff;
   text-align: center;
-  overflow: hidden;
+  overflow-x: hidden;
 }
 
 video.bg-video {
@@ -17,7 +17,7 @@ video.bg-video {
   object-fit: cover;
 }
 
-/* 🔲 Header overlay (utilisateur + crédits) */
+/* 🔲 Header */
 header {
   display: flex;
   justify-content: space-between;
@@ -33,7 +33,7 @@ header {
 header h2 {
   margin: 0;
   color: #ff9800;
-  text-shadow: 0 0 8px #00000;
+  text-shadow: 0 0 8px #000;
 }
 
 header .profile p {
@@ -43,35 +43,43 @@ header .profile p {
 
 /* 🏠 Titre principal */
 h1 {
-  margin-top: 40px;
-  font-size: 32px;
-  color: #000000;
-  text-shadow: 0 0 10px rgba(0, 0, 0, 0);
+  margin: 30px 0;
+  font-size: 2rem;
+  color: #ff9800;
+  text-shadow: 0 0 10px #000;
   z-index: 2;
   position: relative;
 }
 
 /* 🎮 Zone des jeux */
 .menu {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 400px;
-  margin-top: 150px;
-  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 120px;              /* espace entre les cartes */
+  max-width: 1500px;
+  margin: 0 auto;          /* centre horizontalement */
+  padding: 0 20px;
+
+  /* Pour centrer verticalement */
+  min-height: calc(50vh - 100px);  /* ajuste selon header/footer */
+  align-content: center;   /* centre les lignes dans la grille */
+  justify-items: center;   /* centre les cartes dans leurs colonnes */
   z-index: 2;
+  position: relative;
 }
 
 .game-card {
   background: rgba(0, 0, 0, 0.6);
   border: 2px solid #ff9800;
   border-radius: 12px;
-  padding: 25px;
-  width: 20em;
+  padding: 40px;           /* un peu plus gros pour respirer */
   cursor: pointer;
   transition: all 0.3s ease;
   box-shadow: 0 0 12px rgba(0, 0, 0, 0.5);
+  width: 350px;            /* largeur fixe pour éviter qu’elles s’étirent trop */
+  text-align: center;
 }
+
 
 .game-card h2 {
   margin: 0 0 12px;
@@ -83,7 +91,6 @@ h1 {
   color: #ddd;
 }
 
-/* Effet interactif 🎨 */
 .game-card:hover {
   transform: scale(1.05);
   background: rgba(255, 152, 0, 0.15);
@@ -93,7 +100,7 @@ h1 {
 /* 🔊 Bouton son */
 .sound-btn {
   position: fixed;
-  top: 120px;
+  top: 100px;
   left: 20px;
   background: rgba(0, 0, 0, 0.6);
   border: 2px solid #ff9800;
@@ -111,3 +118,18 @@ h1 {
   transform: scale(1.1);
 }
 
+/* 📱 Responsive tweaks */
+@media (max-width: 768px) {
+  h1 {
+    font-size: 1.5rem;
+  }
+
+  .menu {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .game-card {
+    padding: 15px;
+  }
+}
