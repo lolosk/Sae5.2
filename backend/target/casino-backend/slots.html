@@ -3,361 +3,49 @@
 <head>
     <meta charset="UTF-8">
     <title>🎰 Casino - Machine à sous</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: url("imgs/slots.png") no-repeat center center fixed;
-            background-size: contain;   /* affiche toute l'image sans zoom */
-            background-color: #000;     /* met du noir autour si besoin */
-            color: #fff;
-            text-align: center;
-        }
-
-        .top-info {
-            position: absolute;
-            top: 52px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 40px;
-
-            padding: 10px 10px;
-
-        }
-
-        #balance {
-            font-size: 20px;
-            font-weight: bold;
-            color: #00e676;
-
-            margin: 0;
-        }
-
-        #spinResult {
-          font-size: 22px;
-          font-weight: bold;
-          color: #000 !important; /* forcé en noir */
-          padding: 5px 15px;
-          margin: 0;
-        }
-
-
-
-
-        /* --- je le garde si je veux mettre un titre --- */
-        h1 {
-          margin-top: 20px;
-          color: #ff9800;
-          text-shadow: 0 0 8px #ff9800;
-        }
-
-        /* --- Balance & Résultat --- */
-        #balance {
-          margin-top: 10px;
-          font-size: 22px;
-          font-weight: bold;
-          color: #00e676;
-          text-shadow: 0 0 6px #00ff94;
-        }
-
-        #spinResult {
-          margin-top: 10px;
-          font-size: 18px;
-          color: #ffeb3b;
-          text-shadow: 0 0 5px #ffeb3b;
-        }
-
-        .slots {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-49%, -50%);
-            width: 342px;
-            height: 200px;
-            display: flex;
-            justify-content: space-between;
-            padding: 0px;
-            border-radius: 0px;
-        }
-
-        .slots .reel {
-          width: 79px;
-          height: 237px;
-          overflow: hidden;
-          background-image: url("imgs/slotreel.png");
-          background-repeat: repeat-y;
-          background-position-y: 0;
-        }
-
-        /* --- Boutons de mise --- */
-        .bet-buttons {
-          margin-top: 574px; /* décale sous la machine */
-          display: flex;
-          justify-content: center;
-          gap: 15px;
-        }
-
-        .bet-buttons button {
-          font-size: 16px;
-          padding: 1px 20px;
-          border: 2px solid #ff9800;
-          border-radius: 8px;
-          background: rgba(0,0,0,0.5);
-          color: #ff9800;
-          cursor: pointer;
-          transition: 0.2s;
-        }
-
-        .bet-buttons button.active {
-          background: #ff9800;
-          color: #000;
-          transform: scale(1.1);
-        }
-
-        .bet-buttons button:hover {
-          background: #ffa733;
-          color: #000;
-        }
-
-        /* --- Buzzer Spin --- */
-        .spin-btn {
-          margin-top: 20px;
-          width: 255px;
-          height: 130px;
-          border-radius: 50%;
-          border: none;
-          background: radial-gradient(circle at center, #ff0000, #aa0000);
-          box-shadow: 0 0 15px rgba(255,0,0,0.6), inset 0 0 10px rgba(0,0,0,0.7);
-          color: #fff;
-          font-size: 70px;
-          font-weight: bold;
-          cursor: pointer;
-          transition: transform 0.1s;
-        }
-
-        .spin-btn:active {
-          transform: scale(0.9);
-          box-shadow: 0 0 25px rgba(255,0,0,0.9), inset 0 0 15px rgba(0,0,0,0.9);
-        }
-
-
-    </style>
+    <link rel="stylesheet" href="css/slots.css">
 </head>
 <body>
 
-<!-- Balance & Résultat -->
-<div class="top-info">
-    <p id="balance">💰</p>
-    <p id="spinResult"></p>
-</div>
+<!-- 🎬 Conteneur principal avec fond -->
+<div class="slot-container">
 
+    <!-- Balance & Résultat -->
+    <div class="top-info">
+        <p id="balance">💰 0</p>
+        <p id="spinResult"></p>
+    </div>
 
-<div class="slots">
-    <div class="reel" id="reel1"></div>
-    <div class="reel" id="reel2"></div>
-    <div class="reel" id="reel3"></div>
-</div>
+    <!-- Machine à sous -->
+    <div class="slots">
+        <div class="reel" id="reel1"></div>
+        <div class="reel" id="reel2"></div>
+        <div class="reel" id="reel3"></div>
+    </div>
 
-<!-- Boutons de mise -->
-<div class="bet-buttons">
-    <button onclick="selectBet(5)">Miser 5</button>
-    <button onclick="selectBet(50)">Miser 50</button>
-    <button onclick="selectBet(500)">Miser 500</button>
-</div>
+    <!-- Boutons de mise -->
+    <div class="bet-buttons">
+        <button onclick="selectBet(5)">Miser 5</button>
+        <button onclick="selectBet(50)">Miser 50</button>
+        <button onclick="selectBet(500)">Miser 500</button>
+    </div>
 
-<!-- Buzzer Spin -->
-<button class="spin-btn" onclick="startSpin()">SPIN</button>
+    <!-- Buzzer Spin -->
+    <button class="spin-btn" onclick="startSpin()">SPIN</button>
 
-<audio id="bgMusic" src="sounds/background.mp3" loop></audio>
-<audio id="reelStopSound" src="sounds/reel-stop.wav"></audio>
-<audio id="winSound" src="sounds/win.mp3"></audio>
-<audio id="loseSound" src="sounds/lose.mp3"></audio>
+    <!-- Bouton son -->
+    <button id="toggleMusic" class="sound-btn">🔉</button>
 
-<!-- Bouton pour activer/désactiver la musique -->
-<button id="toggleMusic">🎵 Musique ON/OFF</button>
+    <!-- 🔊 Audios -->
+    <audio id="bgMusic" src="sounds/background.mp3" loop></audio>
+    <audio id="reelStopSound" src="sounds/reel-stop.wav"></audio>
+    <audio id="winSound" src="sounds/win.mp3"></audio>
+    <audio id="loseSound" src="sounds/lose.mp3"></audio>
 
+</div> <!-- fin slot-container -->
 
-
-<script>
-    const iconHeight = 79;
-    const icons = ["seven","banana","melon","lemon","bar","bell","orange","plum","cherry"];
-    const numIcons = icons.length;
-
-    const symbolMap = {
-      "7️⃣": "seven",
-      "🍌": "banana",
-      "🍉": "melon",
-      "🍋": "lemon",
-      "🟥": "bar",
-      "🔔": "bell",
-      "🍊": "orange",
-      "🍑": "plum",
-      "🍒": "cherry",
-    };
-
-    const reelEls = [
-      document.getElementById("reel1"),
-      document.getElementById("reel2"),
-      document.getElementById("reel3")
-    ];
-
-    const reelTopIndex = [0,0,0];
-    reelEls.forEach(r => {
-      r.style.backgroundRepeat = "repeat-y";
-      r.style.backgroundPositionY = "0px";
-      r.style.transition = "none";
-    });
-
-    let spinning = false;
-    let currentBet = 5;     // mise par défaut
-    let currentBalance = 0; // sera synchronisé avec le serveur
-
-    function selectBet(amount) {
-      currentBet = amount;
-      document.querySelectorAll(".bet-buttons button").forEach(btn => btn.classList.remove("active"));
-      event.target.classList.add("active");
-    }
-
-    function startSpin() {
-      if (spinning) return;
-      spin(currentBet);
-    }
-
-    function rollTo(reelIdx, finalEmoji, delayIdx) {
-      return new Promise(resolve => {
-        const reel = reelEls[reelIdx];
-        const targetName = symbolMap[finalEmoji] || "cherry";
-        const targetIndex = icons.indexOf(targetName);
-
-        const targetTopIndex = ((targetIndex - 1) + numIcons) % numIcons;
-        const currentTop = reelTopIndex[reelIdx];
-        const deltaSteps = ((targetTopIndex - currentTop) + numIcons) % numIcons;
-
-        const extraTurns = 3 + delayIdx;
-        const totalSteps = extraTurns * numIcons + deltaSteps;
-
-        const fromPx = currentTop * iconHeight;
-        const toPx   = fromPx + totalSteps * iconHeight;
-
-        const durationMs = 900 + delayIdx * 350;
-
-        requestAnimationFrame(() => {
-          reel.style.transition = `background-position-y ${durationMs}ms cubic-bezier(.41,-0.01,.63,1.09)`;
-          reel.style.backgroundPositionY = `${toPx}px`;
-        });
-
-        setTimeout(() => {
-          reel.style.transition = "none";
-          const normalized = (targetTopIndex * iconHeight) % (numIcons * iconHeight);
-          reel.style.backgroundPositionY = `${normalized}px`;
-          reelTopIndex[reelIdx] = targetTopIndex;
-
-          playReelStop(); // 🔊 son à l’arrêt du rouleau
-
-          resolve();
-        }, durationMs + 30);
-      });
-    }
-
-    function spin(bet) {
-      if (spinning) return;
-      spinning = true;
-
-      // 💰 Débit immédiat côté client
-      currentBalance -= bet;
-      document.getElementById("balance").textContent = currentBalance;
-
-      // Message en cours
-      document.getElementById("spinResult").textContent = "🎰 Les rouleaux tournent 🎰";
-
-      fetch("/casino-backend/slots", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "bet=" + encodeURIComponent(bet)
-      })
-      .then(res => res.json())
-      .then(data => {
-        if (data.error) {
-          spinning = false;
-          document.getElementById("spinResult").textContent = "❌ " + data.error;
-          return;
-        }
-
-        Promise.all([
-          rollTo(0, data.symbols[0], 0),
-          rollTo(1, data.symbols[1], 1),
-          rollTo(2, data.symbols[2], 2),
-        ]).then(() => {
-          // ✅ synchronise avec la valeur réelle du serveur
-          currentBalance = data.newCredits;
-          document.getElementById("balance").textContent = currentBalance;
-
-          // ✅ Affiche le résultat avec son associé
-          if (data.gain > 0) {
-            document.getElementById("spinResult").textContent = "Gain: " + data.gain;
-            playWin(); // 🔊 son gain
-          } else {
-            document.getElementById("spinResult").textContent = "💀 Perdu 💀";
-            playLose(); // 🔊 son perte
-          }
-
-          spinning = false;
-        });
-      })
-      .catch(err => {
-        spinning = false;
-        document.getElementById("spinResult").textContent = "❌ Erreur réseau : " + err;
-      });
-    }
-
-    // Active la mise 5 par défaut
-    document.addEventListener("DOMContentLoaded", () => {
-      document.querySelector(".bet-buttons button").classList.add("active");
-    });
-
-    // === Gestion des sons ===
-    const bgMusic = document.getElementById("bgMusic");
-    bgMusic.volume = 0.6; // volume faible (10%)
-
-    const reelStopSound = document.getElementById("reelStopSound");
-    const winSound = document.getElementById("winSound");
-    const loseSound = document.getElementById("loseSound");
-
-    let musicEnabled = false;
-
-    // Toggle musique
-    document.getElementById("toggleMusic").addEventListener("click", () => {
-      if (musicEnabled) {
-        bgMusic.pause();
-        musicEnabled = false;
-      } else {
-        bgMusic.play();
-        musicEnabled = true;
-      }
-    });
-
-    // 🔊 Joue un son quand un rouleau s'arrête
-    function playReelStop() {
-      reelStopSound.currentTime = 0;
-      reelStopSound.play();
-    }
-
-    // 🔊 Joue le son de gain
-    function playWin() {
-      winSound.currentTime = 0;
-      winSound.play();
-    }
-
-    // 🔊 Joue le son de perte
-    function playLose() {
-      loseSound.currentTime = 0;
-      loseSound.play();
-    }
-</script>
-
-
+<!-- JS -->
+<script src="js/slots.js"></script>
 
 </body>
 </html>
