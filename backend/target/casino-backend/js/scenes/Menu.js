@@ -1,5 +1,6 @@
 import { addSoundToggle } from '../utils/soundToggle.js';
 import { playSfx } from '../utils/sfx.js';
+import { api } from '../utils/api.js';
 
 // src/scenes/Menu.js
 export class Menu extends Phaser.Scene {
@@ -31,6 +32,16 @@ export class Menu extends Phaser.Scene {
 
     //Bouton son
     addSoundToggle(this);
+
+    // Guard: obligé d’être connecté
+    const user0 = this.registry.get('user');
+    if (!user0) { this.scene.start('Login'); return; }
+
+    // HUD utilisateur (haut-gauche)
+    const pad = 12;
+    const style = { fontFamily:'system-ui, Arial', fontSize:'18px', color:'#eaf4ff' };
+    this.userText    = this.add.text(pad, 60,  `👤 ${user0.username}`, style).setDepth(999);
+    this.creditsText = this.add.text(pad, 86, `💰 ${user0.credits ?? 0} crédits`, style).setDepth(999);
 
     // --- Fond
     this.background = this.add
@@ -160,6 +171,10 @@ export class Menu extends Phaser.Scene {
       btn.setPosition(x, y);
     });
 
+    // Rafraîchir depuis /api/me au démarrage + quand la scène se réveille
+    this.refreshUser();
+    this.events.on('wake', () => this.refreshUser());
+
 
     // (Option) touche Échap pour revenir au Start
     this.input.keyboard?.on('keydown-ESC', () => this.scene.start('Start'));
@@ -168,4 +183,18 @@ export class Menu extends Phaser.Scene {
   update() {
     this.background.tilePositionX += 2;
   }
+
+  async refreshUser() {
+    try {
+      const { user } = await api('api/me'); // { username, credits }
+      this.registry.set('user', user);
+      this.userText.setText(`👤 ${user.username}`);
+      this.creditsText.setText(`💰 ${user.credits} crédits`);
+    } catch {
+      // session expirée → retour Login
+      this.registry.set('user', null);
+      this.scene.start('Login');
+    }
+  }
+
 }

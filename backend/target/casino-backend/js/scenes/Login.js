@@ -1,24 +1,23 @@
-import { addSoundToggle } from '../utils/soundToggle.js';
-
 // src/scenes/Login.js
+import { addSoundToggle } from '../utils/soundToggle.js';
+import { api } from '../utils/api.js';
+
 export class Login extends Phaser.Scene {
-  constructor() {
-    super('Login');
-  }
+  constructor() { super('Login'); }
 
   preload() {
+    // Si Boot charge déjà ces assets, ce preload est optionnel.
     this.load.image('background', 'assets/menu/bg.png');
     this.load.image('logo', 'assets/menu/logo.png');
-
   }
 
   create() {
     const { width, height } = this.scale.gameSize;
 
-    //Bouton son
+    // --- Bouton son (haut-gauche)
     addSoundToggle(this);
 
-    // --- Fond animé (identique Start/Register)
+    // --- Fond animé
     this.background = this.add
       .tileSprite(width / 2, height / 2, 1280, 720, 'background')
       .setOrigin(0.5);
@@ -54,12 +53,15 @@ export class Login extends Phaser.Scene {
         .actions { display:flex; gap:10px; margin-top:14px; }
         button { flex:1; padding:12px 16px; border:none; border-radius:14px; cursor:pointer; color:white; font-weight:700; letter-spacing:.3px;
           background:linear-gradient(180deg,#1e90ff,#0b6bd3); box-shadow:0 10px 28px rgba(0,0,0,.35); }
+        button:disabled { opacity: .6; cursor: not-allowed; }
         button:active { transform: translateY(1px) scale(.99); }
         .link { margin-top:10px; text-align:right; font-size:14px; }
         .link a { color:#ffd54d; text-decoration:none; }
         .link a:hover { text-decoration:underline; }
         .error { color:#ff8b8b; font-size:13px; display:none; margin-top:6px; }
         .show { display:block; }
+        .hint { margin-top:8px; font-size:12px; opacity:.75; }
+        .hint code { background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:6px; }
       </style>
       <div class="card">
         <h1>Se connecter</h1>
@@ -67,16 +69,17 @@ export class Login extends Phaser.Scene {
         <form id="f">
           <div class="field">
             <label for="u">Nom d'utilisateur</label>
-            <input id="u" name="username" type="text" required minlength="3" maxlength="32" autocomplete="username" placeholder="ex. borne_rj45" />
+            <input id="u" name="username" type="text" required minlength="3" maxlength="32" autocomplete="username" placeholder="ex. admin" />
           </div>
           <div class="field">
             <label for="p">Mot de passe</label>
-            <input id="p" name="password" type="password" required minlength="6" maxlength="128" autocomplete="current-password" placeholder="••••••••" />
+            <input id="p" name="password" type="password" required minlength="4" maxlength="128" autocomplete="current-password" placeholder="••••" />
           </div>
           <div id="err" class="error">Identifiants invalides.</div>
           <div class="actions">
-            <button type="submit">Se connecter</button>
+            <button id="submitBtn" type="submit">Se connecter</button>
           </div>
+          <div class="hint">Compte de test : <code>admin / 1234</code></div>
           <div class="link">
             <a href="#" id="goRegister">Pas de compte ? S’inscrire</a>
           </div>
@@ -87,12 +90,13 @@ export class Login extends Phaser.Scene {
     const dom = this.add.dom(width / 2, height * 0.58).createFromHTML(cardHTML);
     dom.setOrigin(0.5);
 
-    // Logic
+    // --- Logic formulaire
     const root  = dom.node;
     const form  = root.querySelector('#f');
     const u     = root.querySelector('#u');
     const p     = root.querySelector('#p');
     const errEl = root.querySelector('#err');
+    const btn   = root.querySelector('#submitBtn');
     const goRegister = root.querySelector('#goRegister');
 
     const userRe = /^[a-zA-Z0-9._-]{3,32}$/;
@@ -101,35 +105,36 @@ export class Login extends Phaser.Scene {
       e.preventDefault();
       errEl.classList.remove('show');
 
-      // Validation minimale
-      if (!userRe.test(u.value) || !p.value || p.value.length < 6) {
-        errEl.textContent = 'Vérifie le format du nom d’utilisateur et du mot de passe.';
+      // Validation minimale (mot de passe >= 4)
+      if (!userRe.test(u.value) || !p.value || p.value.length < 4) {
+        errEl.textContent = 'Vérifie le format du nom d’utilisateur et un mot de passe (≥ 4).';
         errEl.classList.add('show');
         return;
       }
 
-      // Version actuelle : on “réussit” et on retourne au menu
-      this.scene.start('Menu');
+      btn.disabled = true;
 
-      // Version Servlet à brancher :
-      /*
       try {
-        const res = await fetch('/login', {
+        // Appel à la Servlet (crée la session si OK)
+        const { user } = await api('api/login', {
           method: 'POST',
-          headers: { 'Content-Type':'application/json' },
-          body: JSON.stringify({ username: u.value.trim(), password: p.value })
+          body: { username: u.value.trim(), password: p.value }
         });
-        if (!res.ok) {
-          errEl.textContent = 'Identifiants invalides.';
-          errEl.classList.add('show');
-          return;
-        }
-        this.scene.start('Start'); // ou vers une scène Lobby
-      } catch (e) {
-        errEl.textContent = 'Réseau indisponible. Réessaie.';
+
+        // Sauvegarde côté Phaser (utilisé par Menu, etc.)
+        this.registry.set('user', user);
+
+        // Rediriger vers le Menu
+        this.scene.start('Menu');
+
+      } catch (err) {
+        errEl.textContent = (err.status === 401)
+          ? 'Identifiants invalides (essaie admin / 1234).'
+          : 'Erreur réseau/serveur. Réessaie.';
         errEl.classList.add('show');
+      } finally {
+        btn.disabled = false;
       }
-      */
     });
 
     goRegister.addEventListener('click', (e) => {

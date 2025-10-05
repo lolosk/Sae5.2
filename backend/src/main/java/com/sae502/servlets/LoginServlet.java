@@ -1,42 +1,74 @@
 package com.sae502.servlets;
 
-import com.sae502.servlets.DatabaseConnection;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.*;
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
+import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
 
-@WebServlet(name = "LoginServlet", value = "/login")
+@WebServlet(urlPatterns = "/api/login")
 public class LoginServlet extends HttpServlet {
+    private final Gson gson = new Gson();
+
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
-        String username = req.getParameter("username");
-        String password = req.getParameter("password"); // en clair pour l’instant
+        resp.setContentType("application/json; charset=UTF-8");
 
-        resp.setContentType("text/html");
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "SELECT id, username FROM users WHERE username = ? AND password_hash = ?")) {
-
-            ps.setString(1, username);
-            ps.setString(2, password);
-            ResultSet rs = ps.executeQuery();
-
-            PrintWriter out = resp.getWriter();
-            if (rs.next()) {
-                HttpSession session = req.getSession();
-                session.setAttribute("username", username);
-
-                // Rediriger vers le menu
-                resp.sendRedirect("menu.html");
-            } else {
-                out.println("<h1>Échec de connexion (utilisateur/mot de passe)</h1>");
+        // --- Lire le JSON du body
+        String body = req.getReader().lines().reduce("", (a,b)->a+b);
+        String username = "", password = "";
+        try {
+            com.google.gson.JsonObject json = new com.google.gson.Gson().fromJson(body, com.google.gson.JsonObject.class);
+            if (json != null) {
+                username = json.has("username") ? json.get("username").getAsString() : "";
+                password = json.has("password") ? json.get("password").getAsString() : "";
             }
+        } catch (Exception ex) {
+            resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            resp.getWriter().write("{\"ok\":false,\"error\":\"invalid_json\"}");
+            return;
+        }
+
+        if (username.isBlank() || password.isBlank()) {
+            resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            resp.getWriter().write("{\"ok\":false,\"error\":\"missing_fields\"}");
+            return;
+        }
+
+        try {
+            // ✅ Auth en UNE passe (BCrypt)
+            UserDao.UserRow u = UserDao.authenticateBCrypt(username, password);
+            if (u == null) {
+                resp.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                resp.getWriter().write("{\"ok\":false,\"error\":\"invalid_credentials\"}");
+                return;
+            }
+
+            // Session (évite le nom 'session' si déjà utilisé)
+            HttpSession httpSession = req.getSession(true);
+            httpSession.setAttribute("userId",  u.id);
+            httpSession.setAttribute("user",    u.username);
+            httpSession.setAttribute("credits", u.credits);
+
+            resp.getWriter().write(
+                    "{\"ok\":true,\"user\":{\"id\":" + u.id +
+                            ",\"username\":\"" + u.username + "\"," +
+                            "\"credits\":" + u.credits + "}}"
+            );
+
+        } catch (java.sql.SQLException e) {
+            e.printStackTrace(); // log côté Tomcat
+            resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            resp.getWriter().write("{\"ok\":false,\"error\":\"server_error\",\"detail\":\"sql_exception\"}");
         } catch (Exception e) {
-            resp.getWriter().println("<h1>Erreur login : " + e.getMessage() + "</h1>");
+            e.printStackTrace();
+            resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            resp.getWriter().write("{\"ok\":false,\"error\":\"server_error\"}");
         }
     }
+
+
 }

@@ -6,8 +6,8 @@ export class Audio extends Phaser.Scene {
     this.load.audio('bgm', ['assets/sounds/background.mp3']);
 
     //Bouton son
-    this.load.image('icon_sound_on',  'assets/ui/icon_sound_on.png');
-    this.load.image('icon_sound_off', 'assets/ui/icon_sound_off.png');
+    //this.load.image('icon_sound_on',  'assets/ui/icon_sound_on.png');
+    //this.load.image('icon_sound_off', 'assets/ui/icon_sound_off.png');
 
   }
 
