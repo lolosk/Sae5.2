@@ -5,8 +5,14 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 
 public class DatabaseConnection {
-    private static final String DB_PATH = "C:/Users/lolo5/IdeaProjects/Sae5.2/database/casino.db";
-    private static final String URL = "jdbc:sqlite:" + DB_PATH;
+    static String userHome = System.getProperty("user.home");
+    static String dbpath = userHome + "/IdeaProjects/Sae5.2/database/casino.db";
+
+    // ancienne methode
+    // private static final String DB_PATH = "C:/Users/Kinan/IdeaProjects/sae5.2/database/casino.db";
+
+
+    static final String URL = "jdbc:sqlite:" + dbpath;
 
     static {
         try {
