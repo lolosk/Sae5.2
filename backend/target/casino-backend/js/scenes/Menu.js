@@ -37,11 +37,30 @@ export class Menu extends Phaser.Scene {
     const user0 = this.registry.get('user');
     if (!user0) { this.scene.start('Login'); return; }
 
-    // HUD utilisateur (haut-gauche)
-    const pad = 12;
-    const style = { fontFamily:'system-ui, Arial', fontSize:'18px', color:'#eaf4ff' };
-    this.userText    = this.add.text(pad, 60,  `👤 ${user0.username}`, style).setDepth(999);
-    this.creditsText = this.add.text(pad, 86, `💰 ${user0.credits ?? 0} crédits`, style).setDepth(999);
+    // --- HUD utilisateur (haut-droite), plus compact
+    const HUD_RIGHT_PAD = 12;
+    const HUD_TOP       = 14;
+    const HUD_FONT      = 16;
+    const HUD_GAP       = 18;
+
+    const style = { fontFamily:'system-ui, Arial', fontSize: `${HUD_FONT}px`, color:'#eaf4ff' };
+
+    this.userText = this.add.text(this.scale.gameSize.width - HUD_RIGHT_PAD, HUD_TOP,
+      `👤 ${user0.username}`, style).setOrigin(1, 0).setDepth(999);
+
+    this.creditsText = this.add.text(this.scale.gameSize.width - HUD_RIGHT_PAD, HUD_TOP + HUD_GAP,
+      `💰 ${user0.credits ?? 0} crédits`, style).setOrigin(1, 0).setDepth(999);
+
+    // Recalage si la fenêtre est redimensionnée
+    this.scale.on('resize', ({ width }) => {
+      this.userText.setPosition(width - HUD_RIGHT_PAD, HUD_TOP);
+      this.creditsText.setPosition(width - HUD_RIGHT_PAD, HUD_TOP + HUD_GAP);
+    });
+
+
+
+
+
 
     // --- Fond
     this.background = this.add
