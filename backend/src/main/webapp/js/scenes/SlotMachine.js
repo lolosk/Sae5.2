@@ -20,12 +20,13 @@ export class SlotMachine extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#0d1117');
     this.add.image(W/2, H/2, 'slotBg').setDisplaySize(W, H).setDepth(DEPTH.bg);
 
+
     // Fenêtre des rouleaux (même logique que Slot.js)
     const COLS = 5, ROWS = 3;
     const REELS_WIDTH  = Math.min(680, W * 0.74);
-    const REELS_HEIGHT = Math.min(440, H * 0.42);
+    const REELS_HEIGHT = Math.min(440, H * 0.445);
     const REELS_OFFSET_X = 0;
-    const REELS_OFFSET_Y = 45;
+    const REELS_OFFSET_Y = 42.5;
     const GAP_X = 15;
 
     const reelW   = (REELS_WIDTH - (COLS - 1) * GAP_X) / COLS;
@@ -67,29 +68,108 @@ export class SlotMachine extends Phaser.Scene {
     const frame = this.add.image(W/2, H/2, 'slotFrame').setDepth(DEPTH.frame);
     frame.setScale((W / frame.width) * FRAME_PAD_X, (H / frame.height) * FRAME_PAD_Y);
 
+    // --- HUD utilisateur (haut-droite), compact
+    const HUD_RIGHT_PAD = 14;
+    const HUD_TOP       = 14;
+    const HUD_FONT      = 16;
+    const HUD_GAP       = 18;
+
+    const hudStyle = { fontFamily:'system-ui, Arial', fontSize: `${HUD_FONT}px`, color:'#eaf4ff' };
+
+    // user depuis le registry (sinon on tentera /api/me)
+    const user0 = this.registry.get('user') || {};
+    const startUsername = user0?.username ?? '—';
+    const startCredits  = user0?.credits  ?? 0;
+
+    // X aligné à droite + origin(1,0)
+    const rightX = this.scale.gameSize.width - HUD_RIGHT_PAD;
+
+    this.userText = this.add.text(rightX, HUD_TOP, `👤 ${startUsername}`, hudStyle)
+      .setOrigin(1, 0)
+      .setDepth(330);
+    this.creditsText = this.add.text(rightX, HUD_TOP + HUD_GAP, `💰 ${startCredits} crédits`, hudStyle)
+      .setOrigin(1, 0)
+      .setDepth(330);
+
+    // helpers de màj
+    const setUserHUD = (u) => {
+      if (!u) return;
+      if (typeof u.username === 'string') this.userText.setText(`👤 ${u.username}`);
+      if (typeof u.credits  === 'number') this.creditsText.setText(`💰 ${u.credits} crédits`);
+    };
+
+    // refresh API si pas d’info locale
+    const refreshUser = async () => {
+      try {
+        const me = await api('api/me');           // { user:{ username, credits } }
+        if (me?.user) {
+          this.registry.set('user', me.user);
+          setUserHUD(me.user);
+        }
+      } catch (_) { /* non bloquant */ }
+    };
+
+    // événements de mise à jour
+    this.events.on('wake', refreshUser);
+    this.game.events.on('credits:update', (newCredits) => {
+      const u = this.registry.get('user') || {};
+      const merged = { ...u, credits: newCredits };
+      this.registry.set('user', merged);
+      setUserHUD(merged);
+    });
+
+    // premier affichage si registry vide
+    if (!user0?.username) refreshUser();
+
+
+    // ---- UI layout (réglages rapides)
+    const UI = {
+      // Texte "Lines • Bet"
+      statusX: W / 2,
+      statusY: winTop - 22,
+      statusFontSize: 15,
+
+      // Boutons Lines
+      lineBtnsY: winTop + reelH + 55,
+      lineBtnsGap: 160,             // écart horizontal entre les 3 boutons
+      lineBtnSize: { w: 140, h: 86 },
+      lineBtnFont: 14,
+
+      // Bouton SPIN
+      spinX: W / 2,
+      spinY: winTop + reelH + 100,
+      spinScale: 0.10,
+      spinPress: 0.94,              // effet "press"
+    };
+
+
+
     // UI (lignes fixes + spin)
     this.lineOptions = [1,3,5];
     this.lines = 3; this.bet = 3;
 
-    this.status = this.add.text(W/2, winTop - 40, '', {
-      fontFamily:'monospace', fontSize:18, color:'#e6f1ff'
+    this.status = this.add.text(UI.statusX, UI.statusY, '', {
+      fontFamily:'monospace',
+      fontSize: UI.statusFontSize,
+      color:'#e6f1ff'
     }).setOrigin(0.5,1).setDepth(DEPTH.ui);
     this._refreshStatus();
 
-    const linesY = winTop + reelH + 16;
-    this._lineButtons(W/2, linesY);
+    // Boutons Lines (passe les réglages UI)
+    this._lineButtons(W/2, UI.lineBtnsY, UI);
 
-    const spinY = linesY + 44;
-    const spin = this.add.image(W/2, spinY, 'spinBtn')
+    // Bouton SPIN (position + taille via UI)
+    const spin = this.add.image(UI.spinX, UI.spinY, 'spinBtn')
       .setDepth(DEPTH.overlay)
-      .setInteractive({ useHandCursor:true });
-    const spinScale = Math.min(W, H) / 2000;
-    spin.setScale(0.25 * spinScale);
-    spin.on('pointerdown', ()=> spin.setScale(0.235 * spinScale));
+      .setInteractive({ useHandCursor:true })
+      .setScale(UI.spinScale);
+
+    spin.on('pointerdown', ()=> spin.setScale(UI.spinScale * UI.spinPress));
     spin.on('pointerup', async ()=>{
-      spin.setScale(0.25 * spinScale);
+      spin.setScale(UI.spinScale);
       await this._doSpin({ SYMBOL_H, STRIP_H, SYMBOL_CNT });
     });
+
 
     // Touche D = toggle profondeur (reels devant/derrière pour vérifier le cadre)
     this.input.keyboard.on('keydown-D', ()=>{
