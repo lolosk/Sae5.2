@@ -1,170 +1,241 @@
-const q = s => document.querySelector(s);
-const betsEl = q('#bets');
-const engagedEl = q('#engaged');
-const msgEl = q('#msg');
-const lastEl = q('#last');
-const balanceEl = q('#balance');
-const amountIn = q('#amount');
-const typeSel = q('#type');
-const paramWrap = q('#param-wrap');
-const paramIn = q('#param');
+// js/scenes/Roulette.js
+import { api } from '../utils/api.js';
 
-let localBets = []; // {type, amount, param}
+export class Roulette extends Phaser.Scene {
+  constructor(){ super('Roulette'); }
 
-function euros(n){ return Number(n).toFixed(2) + ' €'; }
+  preload(){
+    const L = (k,p)=>{ if(!this.textures.exists(k)) this.load.image(k,p); };
 
-function setMsg(t){ msgEl.textContent = t || ''; }
-
-function renderBets(){
-  betsEl.innerHTML = '';
-  if(localBets.length === 0){ betsEl.innerHTML = '<li>Aucune mise.</li>'; engagedEl.textContent = 'Total engagé : 0.00 €'; return; }
-  let total = 0;
-  localBets.forEach(b=>{
-    total += Number(b.amount);
-    const li = document.createElement('li');
-    li.textContent = `• ${b.type}${b.param!=null?' '+b.param:''} : ${euros(b.amount)}`;
-    betsEl.appendChild(li);
-  });
-  engagedEl.textContent = `Total engagé : ${euros(total)}`;
-}
-
-function needsParam(type){
-  return type==='STRAIGHT' || type==='DOZEN' || type==='COLUMN';
-}
-
-typeSel.addEventListener('change', ()=>{
-  const t = typeSel.value;
-  paramWrap.classList.toggle('hidden', !needsParam(t));
-  paramIn.value = '';
-  if(t==='STRAIGHT') paramIn.placeholder = '0..36';
-  else if(t==='DOZEN'||t==='COLUMN') paramIn.placeholder = '1..3';
-  else paramIn.placeholder='';
-});
-
-// helpers HTTP
-function postForm(url, data){
-  return fetch(url, {
-    method: 'POST',
-    headers: {'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},
-    body: new URLSearchParams(data).toString()
-  }).then(r=>r.text());
-}
-
-function getState(){
-  // GET /roulette renvoie un texte (“Solde…”, “Mises en cours…”) – on tente d’extraire le solde si présent.
-  return fetch(BASE).then(r=>r.text()).then(txt=>{
-    const m = txt.match(/Solde\s*:\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
-    if(m) balanceEl.textContent = 'Solde : ' + euros(m[1]);
-    return txt;
-  });
-}
-
-// Form “Ajouter mise”
-q('#bet-form').addEventListener('submit', (e)=>{
-  e.preventDefault();
-  setMsg('');
-  const type = typeSel.value;
-  const amount = amountIn.value;
-  let data = {action:'bet', type, amount};
-  if(needsParam(type)){
-    const p = paramIn.value.trim();
-    if(!p){ setMsg('Paramètre requis.'); return; }
-    data.param = p;
+    // Décor / UI (remplace par tes assets)
+    L('rouletteBg',   'assets/roulette/bg.png');
+    L('spinBtn',      'assets/roulette/spin.png');
+    L('clearBtn',     'assets/roulette/clear.png');
+    L('chip',         'assets/roulette/chip.png');
+    L('panel',        'assets/roulette/panel.png');
   }
-  postForm(BASE, data).then(txt=>{
-    // serveur répond en texte ; on se fie à la présence de “Erreur”
-    if(/Erreur/i.test(txt)) { setMsg(txt); return; }
-    // OK côté serveur → on mémorise localement
-    localBets.push({type, amount, param: data.param ?? null});
-    renderBets();
-    setMsg('Mise ajoutée.');
-  }).catch(err=> setMsg('Erreur réseau: '+err.message));
-});
 
-// Bouton Effacer
-q('#clear').addEventListener('click', ()=>{
-  setMsg('');
-  postForm(BASE, {action:'clear'}).then(()=>{
-    localBets = [];
-    renderBets();
-    setMsg('Mises effacées.');
-  });
-});
+  create(){
+    const { width:W, height:H } = this.scale.gameSize;
+    this.cameras.main.setBackgroundColor('#0d1117');
 
-// Bouton Spin
-q('#spin').addEventListener('click', ()=>{
-  setMsg('');
-  postForm(BASE, {action:'spin'}).then(txt=>{
-    // Exemple de réponse :
-    // Résultat : 17 (RED)
-    // Gain total : 10.00 €
-    // Nouveau solde : 995.00 €
-    const num = txt.match(/Résultat\s*:\s*(\d+)\s*\((RED|BLACK|GREEN)\)/i);
-    const gain = txt.match(/Gain total\s*:\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
-    const solde = txt.match(/Nouveau solde\s*:\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
+    // Fond
+    if (this.textures.exists('rouletteBg')) {
+      this.add.image(W/2, H/2, 'rouletteBg').setDisplaySize(W, H);
+    }
 
-    if(num){
-      lastEl.textContent = `Dernier résultat : ${num[1]} (${num[2].toUpperCase()})`;
+    // État local
+    this.betUnit = 1;                      // montant unitaire pour les quick bets
+    this.localBets = [];                   // [{type, amount, param}]
+    this.needsParam = t => ['STRAIGHT','DOZEN','COLUMN'].includes(t);
+
+    // Bandeau statut
+    this.status = this.add.text(W/2, 20, 'Bet: 1', {
+      fontFamily:'monospace', fontSize:18, color:'#e6f1ff'
+    }).setOrigin(0.5,0);
+
+    // Solde + dernier résultat
+    this.balanceTxt = this.add.text(16, 16, 'Solde: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
+    this.lastTxt    = this.add.text(16, 40, 'Dernier: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
+
+    // Panneau des mises courantes
+    const panelW = Math.min(360, W*0.32), panelH = Math.min(240, H*0.35);
+    const panelX = W - panelW/2 - 16, panelY = 16 + panelH/2;
+    if (this.textures.exists('panel')) {
+      this.add.image(panelX, panelY, 'panel').setDisplaySize(panelW, panelH).setAlpha(0.9);
     } else {
-      lastEl.textContent = 'Dernier résultat : —';
+      this.add.rectangle(panelX, panelY, panelW, panelH, 0x0f1e2f, 0.8).setStrokeStyle(1, 0x6fb1ff);
     }
-    if(solde){ balanceEl.textContent = 'Solde : ' + euros(solde[1]); }
-    localBets = []; renderBets();
-    setMsg(gain ? `Encaissement : ${euros(gain[1])}` : txt);
-  }).catch(err=> setMsg('Erreur réseau: '+err.message));
-});
+    this.betsTxt = this.add.text(panelX - panelW/2 + 12, panelY - panelH/2 + 10, 'Aucune mise.', {
+      fontFamily:'monospace', fontSize:14, color:'#e6f1ff', wordWrap:{ width: panelW-24 }
+    });
 
-// Construire la grille 0..36
-(function buildGrid(){
-  const grid = q('#grid');
-  // “0” tout seul
-  const z = document.createElement('div');
-  z.className = 'cell green'; z.textContent = '0';
-  z.title = 'Miser sur 0 (plein)';
-  z.addEventListener('click', ()=> quickStraight(0));
-  grid.appendChild(z);
+    // Contrôles Bet -/+
+    this._btn(W/2-160, H-80, '- Bet', ()=>{ this.betUnit = Math.max(1, this.betUnit-1); this._setStatus(); }, 110);
+    this._btn(W/2+160, H-80, '+ Bet', ()=>{ this.betUnit += 1; this._setStatus(); }, 110);
 
-  // 1..36 par 3 colonnes
-  const reds = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
-  for(let row=0; row<12; row++){
-    for(let col=0; col<3; col++){
-      const n = row*3 + (col+1);
-      const d = document.createElement('div');
-      d.className = 'cell ' + (reds.has(n)?'red':'black');
-      d.textContent = String(n);
-      d.title = `Miser sur ${n} (plein)`;
-      d.addEventListener('click', ()=> quickStraight(n));
-      grid.appendChild(d);
+    // Boutons Spin & Clear
+    this._imageBtn(W/2, H-80, 'spinBtn', async ()=>{ await this._doSpin(); });
+    this._imageBtn(W/2, H-30, 'clearBtn', async ()=>{ await this._clearBets(); this._toast('Mises effacées.'); });
+
+    // Raccourcis (pari rapides sans param)
+    const quicks = [
+      {label:'RED',   type:'RED'},
+      {label:'BLACK', type:'BLACK'},
+      {label:'EVEN',  type:'EVEN'},
+      {label:'ODD',   type:'ODD'},
+      {label:'1-18',  type:'LOW'},
+      {label:'19-36', type:'HIGH'}
+    ];
+    const qY = H-150, qStart = 24, qGap = 86;
+    quicks.forEach((q,i)=>{
+      this._btn(qStart + i*qGap, qY, q.label, async ()=>{
+        await this._addBet({ type:q.type, amount:this.betUnit });
+        this._toast(`Mise ${q.label} +${this.betUnit}`);
+      }, 80);
+    });
+
+    // Grille 0..36 (clic = plein)
+    this._buildNumberGrid({ left: 24, top: 100, cellW: 56, cellH: 40, gap: 6 });
+
+    // Dozens / Columns (nécessitent param 1..3)
+    this._btn(24, 24+56, 'Dozen 1', async ()=> this._placeParamBet('DOZEN',1));
+    this._btn(24+100, 24+56, 'Dozen 2', async ()=> this._placeParamBet('DOZEN',2));
+    this._btn(24+200, 24+56, 'Dozen 3', async ()=> this._placeParamBet('DOZEN',3));
+    this._btn(24, 24+56+40, 'Column 1', async ()=> this._placeParamBet('COLUMN',1));
+    this._btn(24+100, 24+56+40, 'Column 2', async ()=> this._placeParamBet('COLUMN',2));
+    this._btn(24+200, 24+56+40, 'Column 3', async ()=> this._placeParamBet('COLUMN',3));
+
+    // Init via API
+    this._setStatus();
+    this._getState().catch(()=>{});
+  }
+
+  // ---------- UI helpers ----------
+  _btn(x,y,label,on,w=120){
+    const c = this.add.container(x,y);
+    const bg = this.add.rectangle(0,0,w,30,0x14253a).setStrokeStyle(1,0x6fb1ff).setInteractive({useHandCursor:true});
+    const tx = this.add.text(0,0,label,{fontFamily:'monospace',fontSize:14,color:'#eaffff'}).setOrigin(0.5);
+    bg.on('pointerdown',()=> bg.setScale(0.98));
+    bg.on('pointerup',()=>{ bg.setScale(1); on&&on(); });
+    c.add([bg,tx]); return c;
+  }
+  _imageBtn(x,y,key,on){
+    let node;
+    if(this.textures.exists(key)){
+      node = this.add.image(x,y,key).setInteractive({useHandCursor:true});
+      node.on('pointerdown',()=> node.setScale(0.96));
+      node.on('pointerup',()=>{ node.setScale(1); on&&on(); });
+    } else {
+      node = this._btn(x,y,key, on, 120);
+    }
+    return node;
+  }
+  _setStatus(t){ this.status.setText(t || `Bet: ${this.betUnit}`); }
+  _euro(n){ return Number(n).toFixed(2) + ' €'; }
+  _toast(t){
+    this._setStatus(t);
+    this.time.delayedCall(900, ()=> this._setStatus(), null, this);
+  }
+
+  // ---------- Grille numéros ----------
+  _buildNumberGrid({ left, top, cellW, cellH, gap }){
+    // 0
+    const zero = this._gridCell(left, top, cellW, cellH, '0', 0x0aa44a);
+    zero.on('pointerup', async ()=>{ await this._placeStraight(0); });
+
+    // 1..36 (3 colonnes × 12 lignes)
+    const reds = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
+    for(let row=0; row<12; row++){
+      for(let col=0; col<3; col++){
+        const n = row*3 + (col+1);
+        const x = left + cellW + gap + col*(cellW+gap);
+        const y = top + row*(cellH+gap);
+        const color = reds.has(n) ? 0xb02121 : 0x111111;
+        const c = this._gridCell(x, y, cellW, cellH, String(n), color);
+        c.on('pointerup', async ()=>{ await this._placeStraight(n); });
+      }
     }
   }
-})();
+  _gridCell(x,y,w,h,label,bgColor){
+    const c = this.add.container(x + w/2, y + h/2).setSize(w,h);
+    const r = this.add.rectangle(0,0,w,h,bgColor).setStrokeStyle(1,0x6fb1ff).setInteractive({useHandCursor:true});
+    const t = this.add.text(0,0,label,{fontFamily:'monospace',fontSize:14,color:'#e6f1ff'}).setOrigin(0.5);
+    c.add([r,t]);
+    r.on('pointerdown',()=> c.setScale(0.98));
+    r.on('pointerup',()=> c.setScale(1));
+    return r;
+  }
 
-function quickStraight(n){
-  const amt = amountIn.value || '1.00';
-  postForm(BASE, {action:'bet', type:'STRAIGHT', amount: amt, param: n})
-    .then(txt=>{
-      if(/Erreur/i.test(txt)) { setMsg(txt); return; }
-      localBets.push({type:'STRAIGHT', amount:amt, param:n});
-      renderBets(); setMsg(`Mise plein ${n} ajoutée.`);
+  // ---------- API wrappers ----------
+  async _getState(){
+    const s = await api('api/roulette/state', { method:'GET' });
+    if (typeof s.balance !== 'undefined'){
+      this.balanceTxt.setText('Solde: ' + this._euro(s.balance));
+    }
+    if (Array.isArray(s.bets)){
+      this.localBets = s.bets.map(b=>({ type:b.type, amount:b.amount, param:b.param ?? null }));
+      this._renderBets();
+    }
+    if (s.lastResult){
+      const { number, color } = s.lastResult;
+      this.lastTxt.setText(`Dernier: ${number} (${String(color).toUpperCase()})`);
+    }
+  }
+
+  async _addBet({ type, amount, param }){
+    const body = { type, amount:Number(amount) };
+    if (param!=null) body.param = param;
+    const r = await api('api/roulette/bets', { method:'POST', body });
+    if (r.balance!=null) this.balanceTxt.setText('Solde: ' + this._euro(r.balance));
+    if (Array.isArray(r.bets)){
+      this.localBets = r.bets.map(b=>({ type:b.type, amount:b.amount, param:b.param ?? null }));
+    } else {
+      this.localBets.push({ type, amount:Number(amount), param: param ?? null });
+    }
+    this._renderBets();
+  }
+
+  async _clearBets(){
+    await api('api/roulette/bets', { method:'DELETE' });
+    this.localBets = [];
+    this._renderBets();
+  }
+
+  async _doSpin(){
+    // lock simple pour éviter double clic
+    if (this._spinning) return;
+    this._spinning = true;
+    this._setStatus('Spinning...');
+    try{
+      const r = await api('api/roulette/spin', { method:'POST' });
+      if (r.result){
+        const { number, color } = r.result;
+        this.lastTxt.setText(`Dernier: ${number} (${String(color).toUpperCase()})`);
+      }
+      if (r.balance!=null) this.balanceTxt.setText('Solde: ' + this._euro(r.balance));
+      this.localBets = []; this._renderBets();
+      if (r.gain && Number(r.gain)>0){ this._flashWin(); this._setStatus(`WIN +${this._euro(r.gain)}`); }
+      else { this._setStatus('No win'); }
+      // notifier une scène HUD globale si tu en as une :
+      this.game.events.emit('credits:update', r.balance);
+    } catch(e){
+      console.error(e);
+      this._setStatus('Server error');
+    }
+    this._spinning = false;
+  }
+
+  // ---------- Actions haut niveau ----------
+  async _placeStraight(n){
+    try{
+      await this._addBet({ type:'STRAIGHT', amount:this.betUnit, param:n });
+      this._toast(`Plein ${n} +${this.betUnit}`);
+    }catch(e){ this._toast('Erreur mise'); }
+  }
+  async _placeParamBet(type, param){
+    try{
+      await this._addBet({ type, amount:this.betUnit, param });
+      this._toast(`${type} ${param} +${this.betUnit}`);
+    }catch(e){ this._toast('Erreur mise'); }
+  }
+
+  // ---------- Rendu des mises ----------
+  _renderBets(){
+    if(this.localBets.length===0){ this.betsTxt.setText('Aucune mise.'); return; }
+    let total = 0;
+    const lines = this.localBets.map(b=>{
+      total += Number(b.amount);
+      return `• ${b.type}${b.param!=null?' '+b.param:''} : ${this._euro(b.amount)}`;
     });
+    lines.push(`\nTotal engagé : ${this._euro(total)}`);
+    this.betsTxt.setText(lines.join('\n'));
+  }
+
+  // ---------- Effet gain ----------
+  _flashWin(){
+    const { width:W, height:H } = this.scale.gameSize;
+    const r = this.add.rectangle(W/2, H/2, W, H, 0x00ff88, 0.12).setDepth(999);
+    this.tweens.add({ targets:r, alpha:0, duration:420, onComplete:()=>r.destroy() });
+  }
 }
-
-// Raccourcis
-document.querySelectorAll('.quick button').forEach(b=>{
-  b.addEventListener('click', ()=>{
-    const type = b.dataset.quick;
-    const param = b.dataset.param ?? null;
-    const amt = amountIn.value || '1.00';
-    const data = {action:'bet', type, amount: amt};
-    if(param) data.param = param;
-    postForm(BASE, data).then(txt=>{
-      if(/Erreur/i.test(txt)) { setMsg(txt); return; }
-      localBets.push({type, amount:amt, param:param?Number(param):null});
-      renderBets(); setMsg('Mise ajoutée.');
-    });
-  });
-});
-
-// init
-renderBets();
-getState();
