@@ -6,7 +6,7 @@ export class SlotMachine extends Phaser.Scene {
 
   preload(){
     this.load.image('slotBg',    'assets/slot/slot-background.png');
-    this.load.image('slotFrame', 'assets/slot/cadre-slot.png');
+    this.load.image('slotFrame', 'assets/slot/Cadre_slot.png');
     this.load.image('reel_clear','assets/slot/reel_clear.png');
     this.load.image('reel_blur', 'assets/slot/reel_blur.png');
     this.load.image('spinBtn',   'assets/slot/spin.png');
@@ -24,9 +24,9 @@ export class SlotMachine extends Phaser.Scene {
     // Fenêtre des rouleaux (même logique que Slot.js)
     const COLS = 5, ROWS = 3;
     const REELS_WIDTH  = Math.min(680, W * 0.74);
-    const REELS_HEIGHT = Math.min(440, H * 0.445);
+    const REELS_HEIGHT = Math.min(440, H * 0.459);
     const REELS_OFFSET_X = 0;
-    const REELS_OFFSET_Y = 42.5;
+    const REELS_OFFSET_Y = -30.5;
     const GAP_X = 15;
 
     const reelW   = (REELS_WIDTH - (COLS - 1) * GAP_X) / COLS;
@@ -62,11 +62,19 @@ export class SlotMachine extends Phaser.Scene {
       this.reels.push({ sprite:spr });
     }
 
-    // Cadre (format exact demandé)
-    const FRAME_PAD_X = 0.80;
-    const FRAME_PAD_Y = 0.98;
-    const frame = this.add.image(W/2, H/2, 'slotFrame').setDepth(DEPTH.frame);
-    frame.setScale((W / frame.width) * FRAME_PAD_X, (H / frame.height) * FRAME_PAD_Y);
+    // Cadre (format exact demandé) + offsets
+    const FRAME_PAD_X    = 0.80;
+    const FRAME_PAD_Y    = 0.88;
+    const FRAME_OFFSET_X = 0;    // + => droite,  - => gauche
+    const FRAME_OFFSET_Y = -48;   // + => bas,     - => haut
+
+    const frame = this.add
+      .image(W/2 + FRAME_OFFSET_X, H/2 + FRAME_OFFSET_Y, 'slotFrame')
+      .setDepth(DEPTH.frame);
+
+    frame.setScale((W / frame.width) * FRAME_PAD_X,
+                   (H / frame.height) * FRAME_PAD_Y);
+
 
     // --- HUD utilisateur (haut-droite), compact
     const HUD_RIGHT_PAD = 14;
@@ -126,12 +134,12 @@ export class SlotMachine extends Phaser.Scene {
     const UI = {
       // Texte "Lines • Bet"
       statusX: W / 2,
-      statusY: winTop - 22,
+      statusY: winTop - 25,
       statusFontSize: 15,
 
       // Boutons Lines
       lineBtnsY: winTop + reelH + 55,
-      lineBtnsGap: 160,             // écart horizontal entre les 3 boutons
+      lineBtnsGap: 165,             // écart horizontal entre les 3 boutons
       lineBtnSize: { w: 140, h: 86 },
       lineBtnFont: 14,
 
