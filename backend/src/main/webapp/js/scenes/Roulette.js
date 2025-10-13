@@ -8,11 +8,14 @@ export class Roulette extends Phaser.Scene {
     const L = (k,p)=>{ if(!this.textures.exists(k)) this.load.image(k,p); };
 
     // Décor / UI (remplace par tes assets)
-    L('rouletteBg',   'assets/roulette/bg.png');
-    L('spinBtn',      'assets/roulette/spin.png');
-    L('clearBtn',     'assets/roulette/clear.png');
-    L('chip',         'assets/roulette/chip.png');
-    L('panel',        'assets/roulette/panel.png');
+    L('rouletteBg',        'assets/roulette/bgRoulette.png');
+    L('spinBtn',           'assets/roulette/spin-roulette.png');
+    L('GreenChipsBtn',     'assets/roulette/green-chips.png');
+    L('RedChipsBtnchip',   'assets/roulette/chip.png');
+    L('panel',             'assets/roulette/panel.png');
+    L('StaticCursor',      'assets/roulette/triangle.png');
+    L('RouletteWheel_bg',  'assets/roulette/roulette_wheel_bg.png');
+    L('RouletteWheel',     'assets/roulette/roulette_wheel_bg.png');
   }
 
   create(){
