@@ -216,8 +216,17 @@ public class BlackJackServlet extends HttpServlet {
     }
 
     private static String draw(Deque<String> deck) {
-        return deck.pollFirst();
+        String c = deck.pollFirst();
+        if (c == null) {
+            // deck vide → on en reconstruit un
+            Deque<String> newDeck = buildShuffledDeck();
+            c = newDeck.pollFirst();
+            // on remplace le deck passé en paramètre
+            deck.addAll(newDeck);
+        }
+        return c;
     }
+
 
     private static int handValue(List<String> hand) {
         int total = 0, aces = 0;
