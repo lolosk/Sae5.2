@@ -53,14 +53,30 @@ public class BlackJackServlet extends HttpServlet {
     }
 
     private void handleStart(HttpServletRequest req, HttpServletResponse resp, HttpSession session, String username) throws IOException, SQLException {
-        // lire bet
-        int bet = 0;
+        // bloque si partie en cours
+        BJState existing = (BJState) session.getAttribute("bjState");
+        if (existing != null && !existing.finished) {
+            resp.setStatus(HttpServletResponse.SC_CONFLICT);
+            resp.getWriter().write("{\"ok\":false,\"error\":\"game_in_progress\"}");
+            return;
+        }
+
+        // lire le bet de façon robuste
+        int bet;
+        JsonObject body;
         try (BufferedReader r = req.getReader()) {
-            JsonObject body = gson.fromJson(r, JsonObject.class);
+            body = gson.fromJson(r, JsonObject.class);
+        }
+        if (body == null || !body.has("bet") || !body.get("bet").isJsonPrimitive()) {
+            resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            resp.getWriter().write("{\"ok\":false,\"error\":\"invalid_json\"}");
+            return;
+        }
+        try {
             bet = body.get("bet").getAsInt();
         } catch (Exception e) {
             resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-            resp.getWriter().write("{\"ok\":false,\"error\":\"invalid_json\"}");
+            resp.getWriter().write("{\"ok\":false,\"error\":\"invalid_bet\"}");
             return;
         }
         if (bet <= 0) {
@@ -102,10 +118,13 @@ public class BlackJackServlet extends HttpServlet {
 
         JsonObject out = new JsonObject();
         out.addProperty("ok", true);
-        out.add("state", stateToJson(st, false));
+        JsonObject stateJson = stateToJson(st, false);
+        stateJson.addProperty("playerValue", handValue(st.player));
+        out.add("state", stateJson);
         out.addProperty("credits", credits);
         resp.getWriter().write(out.toString());
     }
+
 
     private void handleHit(HttpServletResponse resp, HttpSession session, String username) throws IOException, SQLException {
         BJState st = (BJState) session.getAttribute("bjState");
