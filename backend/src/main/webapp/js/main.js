@@ -5,7 +5,6 @@ import { Start }    from './scenes/Start.js';
 import { Register } from './scenes/Register.js';
 import { Login }    from './scenes/Login.js';
 import { Menu }     from './scenes/Menu.js';
-import { Slot }    from './scenes/Slot.js';
 import { SlotMachine } from './scenes/SlotMachine.js';
 
 const config = {
@@ -13,7 +12,7 @@ const config = {
   parent: 'game-container',
   width: 1280, height: 720,
   backgroundColor: '#000000',
-  scene: [Boot, Audio, Start, Register, Login, Menu, Slot, SlotMachine], // Boot d'abord
+  scene: [Boot, Audio, Start, Register, Login, Menu, SlotMachine], // Boot d'abord
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   dom: { createContainer: true }
 };
