@@ -19,7 +19,7 @@ public class RouletteServlet extends HttpServlet {
     enum Color { RED, BLACK, GREEN }
 
     private static final Set<Integer> REDS = Set.of(
-            1,3,5,7,9,12,14,16,18,21,23,25,27,28,30,32,34,36
+            1,3,5,7,9,12,14,16,18,21,23,25,27,30,32,34,36
     );
 
     private static Color colorOf(int number) {
