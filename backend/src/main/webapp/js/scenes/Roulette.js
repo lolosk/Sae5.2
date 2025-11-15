@@ -37,18 +37,26 @@ export class Roulette extends Phaser.Scene {
     }
 
     // État local
-    this.betUnit = 1;
+    this.betUnit = 10;
     this.localBets = [];
+
+    // --- chips overlay ---
+    this.numCells = {};                 // n -> {cx, cy, w, h}
+    this.chipsByNumber = new Map();     // n -> Image[]
+    this.chipsLayer = this.add.container(0,0).setDepth(50);
+
+
     this.needsParam = t => ['STRAIGHT','DOZEN','COLUMN'].includes(t);
 
     // Bandeau statut
-    this.status = this.add.text(W/2, 14, 'Bet: 1', {
+    this.status = this.add.text(W/2, 14, 'Mise de base minimale : 10', {
       fontFamily:'monospace', fontSize:18, color:'#e6f1ff'
     }).setOrigin(0.5,0);
 
     // Solde + dernier résultat
     this.balanceTxt = this.add.text(16, 16, 'Solde: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
     this.lastTxt    = this.add.text(16, 40, 'Dernier: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
+    this.BetTxt    = this.add.text(16, 700, '*Jeton vert (réduire mise), jeton rouge (augmenter mise)', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
 
     // Roue à droite
     this._buildWheel(W, H);
@@ -57,34 +65,23 @@ export class Roulette extends Phaser.Scene {
     const panelW = Math.min(360, W*0.32), panelH = Math.min(240, H*0.35);
     const panelX = W - panelW/2 - 16, panelY = 16 + panelH/2;
     if (this.textures.exists('panel')) {
-      this.add.image(panelX, panelY, 'panel').setDisplaySize(panelW, panelH).setAlpha(0.9);
+      this.add.image(panelX, panelY, 'panel').setDisplaySize(panelW, panelH).setAlpha(0.9).setDepth(30);
     } else {
-      this.add.rectangle(panelX, panelY, panelW, panelH, 0x0f1e2f, 0.8).setStrokeStyle(1, 0x6fb1ff);
+      this.add.rectangle(panelX, panelY, panelW, panelH, 0x0f1e2f, 0.8).setStrokeStyle(1, 0x6fb1ff).setDepth(30);
     }
     this.betsTxt = this.add.text(panelX - panelW/2 + 12, panelY - panelH/2 + 10, 'Aucune mise.', {
       fontFamily:'monospace', fontSize:14, color:'#e6f1ff', wordWrap:{ width: panelW-24 }
-    });
+    }).setDepth(31);
 
-    // Bet -/+ avec jetons
-    const chipY = H - 64;
-    const minus = this._imageBtn(W/2 - 160, chipY, 'RedChipsBtnchip', ()=>{
-      this.betUnit = Math.max(1, this.betUnit-1); this._setStatus(); this._toast(`Bet − : ${this.betUnit}`);
-    });
-    minus && minus.setScale(0.6);
-
-    const plus = this._imageBtn(W/2 + 160, chipY, 'GreenChipsBtn', ()=>{
-      this.betUnit += 1; this._setStatus(); this._toast(`Bet + : ${this.betUnit}`);
-    });
-    plus && plus.setScale(0.6);
 
     // Spin & Clear
     const spin = this._imageBtn(W/2, H-110, 'spinBtn', async ()=>{ await this._doSpin(); });
-    if (spin) spin.setScale(0.9);
+    if (spin) spin.setScale(0.4);
 
     const clear = this._imageBtn(W/2, H-60, 'clearBtn', async ()=>{
       await this._clearBets(); this._toast('Mises effacées.');
     });
-    if (clear) clear.setScale(0.7);
+    if (clear) clear.setScale(0.4);
 
     // Raccourcis (pari rapides)
     const quicks = [
@@ -106,7 +103,35 @@ export class Roulette extends Phaser.Scene {
     });
 
     // Grille 0..36 (clic = plein)
-    this._buildNumberGrid({ left: 24, top: 100, cellW: 56, cellH: 40, gap: 6 });
+    const grid = { left: 24, top: 100, cellW: 56, cellH: 40, gap: 6 };
+    this._buildNumberGrid(grid);
+
+    // mettre les types de mises sous la table
+    const placeBetButtons = ()=>{
+      const c34 = this.numCells[34];
+      const c36 = this.numCells[36];
+      if (!c34 || !c36) return; // sécurité : si pas encore prêts, on réessaie au tick suivant
+
+      const yBelow = Math.max(c34.cy + c34.h/2, c36.cy + c36.h/2) + 18;
+
+      const small_chip = this._imageBtn(c34.cx, yBelow, 'RedChipsBtnchip', ()=>{
+        this.betUnit = Math.max(10, this.betUnit-10);
+        this._setStatus(); this._toast(`Bet − : ${this.betUnit}`);
+      });
+      if (small_chip) small_chip.setScale(0.03).setDepth(60);
+
+      const big_chip = this._imageBtn(c36.cx, yBelow, 'GreenChipsBtn', ()=>{
+        this.betUnit += 10;
+        this._setStatus(); this._toast(`Bet + : ${this.betUnit}`);
+      });
+      if (big_chip) big_chip.setScale(0.03).setDepth(60);
+    };
+
+    // Appel immédiat + re-try au tick suivant si nécessaire
+    placeBetButtons();
+    this.time.delayedCall(0, placeBetButtons);
+
+
 
     // Dozens / Columns
     this._btn(24,       24+56,      'Dozen 1',  async ()=> this._placeParamBet('DOZEN',1));
@@ -131,37 +156,47 @@ export class Roulette extends Phaser.Scene {
 
     this.wheelGroup = this.add.container(wheelX, wheelY);
 
-    // BG
-    if (this.textures.exists('RouletteWheel_bg')){
-      const bg = this.add.image(0,0,'RouletteWheel_bg');
-      const s = Math.min(maxSize/bg.width, maxSize/bg.height);
-      bg.setScale(s);
-      this.wheelGroup.add(bg);
-    }
-
-    // Wheel rotative (fallback sur bg si l’asset n’existe pas)
-    let baseKey = this.textures.exists('RouletteWheel') ? 'RouletteWheel' :
-                  (this.textures.exists('RouletteWheel_bg') ? 'RouletteWheel_bg' : null);
-    if (baseKey){
-      this.wheel = this.add.image(0,0,baseKey);
+    // 1) Crée la roue qui TOURNE
+    this.wheel = null;
+    if (this.textures.exists('RouletteWheel')){
+      this.wheel = this.add.image(0,0,'RouletteWheel');
       const s2 = Math.min(maxSize*0.96/this.wheel.width, maxSize*0.96/this.wheel.height);
       this.wheel.setScale(s2);
-      this.wheelGroup.add(this.wheel);
+      this.wheelGroup.add(this.wheel); // ajoutée AVANT le hub si on veut le hub DEVANT
     } else {
-      this.wheel = null;
+      // fallback visuel si l'asset n'existe pas
+      const r = this.add.circle(0,0, Math.floor(maxSize*0.45), 0x444444);
+      this.wheelGroup.add(r);
     }
 
-    // Curseur
+    // 2) Ajoute le "moyeu" centré (fixe). IMPORTANT : ordre d'ajout !
+    if (this.textures.exists('RouletteWheel_bg')){
+      const hub = this.add.image(0,0,'RouletteWheel_bg');
+
+      // Taille ~32% du diamètre de la roue
+      const refW = this.wheel ? this.wheel.displayWidth : maxSize;
+      const ratio = 1.10; // ajuste entre 0.25 et 0.45
+      const target = refW * ratio;
+      const sHub = Math.min(target / hub.width, target / hub.height);
+      hub.setScale(sHub);
+
+      // Si tu veux que le hub soit DEVANT la roue :
+      // this.wheelGroup.add(hub);
+
+      // Si ton hub est opaque et recouvre tout, mets-le DERRIÈRE la roue :
+      this.wheelGroup.addAt(hub, 0);
+    }
+
+    // 3) Curseur au-dessus
     if (this.textures.exists('StaticCursor')){
-      const ref = this.wheel ?? this.wheelGroup.list[0];
+      const ref = this.wheel;
       const radius = ref ? (ref.displayWidth/2) : (maxSize/2);
       const cursor = this.add.image(0, -radius - 14, 'StaticCursor');
       if (cursor.width && cursor.height){
         const cs = Math.min(28/cursor.width, 28/cursor.height);
         cursor.setScale(cs);
       }
-      cursor.setDepth(10);
-      this.wheelGroup.add(cursor);
+      this.wheelGroup.add(cursor); // ajouté en dernier ⇒ au-dessus
     }
   }
 
@@ -177,9 +212,9 @@ export class Roulette extends Phaser.Scene {
   _imageBtn(x,y,key,on){
     if(this.textures.exists(key)){
       const node = this.add.image(x,y,key).setInteractive({useHandCursor:true});
-      const base =  node.scale || 1;
-      node.on('pointerdown',()=> node.setScale(base*0.96));
-      node.on('pointerup',()=>{ node.setScale(base); on&&on(); });
+      // anime toujours autour de l'échelle courante (quel que soit le setScale appliqué après)
+      node.on('pointerdown', ()=> node.setScale(node.scale * 0.96));
+      node.on('pointerup',   ()=> { node.setScale(node.scale / 0.96); on&&on(); });
       return node;
     }
     else {
@@ -196,6 +231,7 @@ export class Roulette extends Phaser.Scene {
   // ---------- Grille numéros ----------
   _buildNumberGrid({ left, top, cellW, cellH, gap }){
     // 0
+    this._registerCell(0, left, top, cellW, cellH);
     const zero = this._gridCell(left, top, cellW, cellH, '0', 0x0aa44a);
     zero.on('pointerup', async ()=>{ await this._placeStraight(0); });
 
@@ -207,11 +243,13 @@ export class Roulette extends Phaser.Scene {
         const x = left + cellW + gap + col*(cellW+gap);
         const y = top + row*(cellH+gap);
         const color = reds.has(n) ? 0xb02121 : 0x111111;
+        this._registerCell(n, x, y, cellW, cellH);
         const c = this._gridCell(x, y, cellW, cellH, String(n), color);
         c.on('pointerup', async ()=>{ await this._placeStraight(n); });
       }
     }
   }
+
   _gridCell(x,y,w,h,label,bgColor){
     const c = this.add.container(x + w/2, y + h/2).setSize(w,h);
     const r = this.add.rectangle(0,0,w,h,bgColor).setStrokeStyle(1,0x6fb1ff).setInteractive({useHandCursor:true});
@@ -221,6 +259,54 @@ export class Roulette extends Phaser.Scene {
     r.on('pointerup',()=> c.setScale(1));
     return r;
   }
+
+   _registerCell(n, x, y, w, h){
+     this.numCells[n] = { cx: x + w/2, cy: y + h/2, w, h };
+   }
+
+   // ---------- Chips (affichage) ----------
+   _addChipOnNumber(n){
+     const cell = this.numCells[n]; if (!cell) return;
+     if (!this.chipsByNumber.has(n)) this.chipsByNumber.set(n, []);
+     const stack = this.chipsByNumber.get(n);
+
+     const key = (stack.length % 2 === 0) ? 'GreenChipsBtn' : 'RedChipsBtnchip';
+     const chip = this.add.image(cell.cx, cell.cy, key);
+     this.chipsLayer.add(chip);
+
+     // scale auto en fonction de la case
+     const target = Math.min(cell.w, cell.h) * 0.78;
+     const base = Math.max(chip.width || 64, chip.height || 64);
+     chip.setScale(target / base);
+
+     // léger décalage pour l'empilement
+     const off = Math.min(cell.w, cell.h) * 0.14;
+     const col = stack.length % 3;
+     const row = Math.floor(stack.length / 3);
+     chip.x += (col - 1) * off;
+     chip.y -= row * (off * 0.9);
+
+     // petite anim
+     chip.setAlpha(0).setScale(chip.scale * 0.8);
+     this.tweens.add({ targets: chip, alpha:1, scale: chip.scale/0.8, duration:120, ease:'Cubic.Out' });
+
+     stack.push(chip);
+   }
+
+   _clearChips(){
+     for (const [,list] of this.chipsByNumber){ list.forEach(s=> s.destroy()); }
+     this.chipsByNumber.clear();
+   }
+
+   _rebuildChipsFromLocalBets(){
+     this._clearChips();
+     for (const b of this.localBets){
+       if (b.type === 'STRAIGHT' && b.param != null){
+         const count = Math.max(1, Number(b.amount) | 0);
+         for (let i=0;i<count;i++) this._addChipOnNumber(b.param);
+       }
+     }
+   }
 
   // ---------- API wrappers (fallback local si serveur HS) ----------
   async _getState(){
@@ -232,6 +318,7 @@ export class Roulette extends Phaser.Scene {
       if (Array.isArray(s.bets)){
         this.localBets = s.bets.map(b=>({ type:b.type, amount:b.amount, param:b.param ?? null }));
         this._renderBets();
+        this._rebuildChipsFromLocalBets();
       }
       if (s.lastResult){
         const { number, color } = s.lastResult;
@@ -255,10 +342,12 @@ export class Roulette extends Phaser.Scene {
         this.localBets.push({ type, amount:Number(amount), param: param ?? null });
       }
       this._renderBets();
+      if (type==='STRAIGHT' && param!=null) this._addChipOnNumber(param);
     }catch(e){
       // Fallback local
       this.localBets.push({ type, amount:Number(amount), param: param ?? null });
       this._renderBets();
+      if (type==='STRAIGHT' && param!=null) this._addChipOnNumber(param);
       throw e;
     }
   }
@@ -269,6 +358,7 @@ export class Roulette extends Phaser.Scene {
     }catch{}
     this.localBets = [];
     this._renderBets();
+    this._clearChips();
   }
 
   async _doSpin(){
@@ -298,6 +388,7 @@ export class Roulette extends Phaser.Scene {
       }
       if (r.balance!=null) this.balanceTxt.setText('Solde: ' + this._euro(r.balance));
       this.localBets = []; this._renderBets();
+      this._clearChips();
       if (r.gain && Number(r.gain)>0){ this._flashWin(); this._setStatus(`WIN +${this._euro(r.gain)}`); }
       else { this._setStatus('No win'); }
       this.game.events.emit('credits:update', r.balance);
@@ -309,6 +400,7 @@ export class Roulette extends Phaser.Scene {
       await tweenPromise;
       this.lastTxt.setText(`Dernier: ${n} (${color.toUpperCase()})`);
       this.localBets = []; this._renderBets();
+      this._clearChips();
       this._setStatus('No win (offline)');
     }
     this._spinning = false;
