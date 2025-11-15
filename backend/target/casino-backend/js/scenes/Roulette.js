@@ -5,12 +5,11 @@ export class Roulette extends Phaser.Scene {
   constructor(){ super('Roulette'); }
 
   preload(){
-    this.load.image('background', 'assets/menu/bg.png');
     const L = (k,p)=>{ if(!this.textures.exists(k)) this.load.image(k,p); };
 
     // Décor / UI (remplace par tes assets)
-    L('rouletteBg',   'assets/roulette/bg-roulette.png');
-    L('spinBtn',      'assets/roulette/spin-roulette.png');
+    L('rouletteBg',   'assets/roulette/bg.png');
+    L('spinBtn',      'assets/roulette/spin.png');
     L('clearBtn',     'assets/roulette/clear.png');
     L('chip',         'assets/roulette/chip.png');
     L('panel',        'assets/roulette/panel.png');
@@ -19,6 +18,10 @@ export class Roulette extends Phaser.Scene {
   create(){
     const { width:W, height:H } = this.scale.gameSize;
     this.cameras.main.setBackgroundColor('#0d1117');
+
+    // Fond
+    if (this.textures.exists('rouletteBg')) {
+      this.add.image(W/2, H/2, 'rouletteBg').setDisplaySize(W, H);
     }
 
     // État local
