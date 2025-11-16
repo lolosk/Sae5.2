@@ -46,9 +46,11 @@ export class SlotMachine extends Phaser.Scene {
   _setCredits(next){
     const u = this.registry.get('user') || {};
     const val = Math.max(0, Math.floor(next));
-    this.registry.set('user', { ...u, credits: val });
+    this.registry.set('user', { ...u, credits: val }); // <-- correct
     this.game.events.emit('credits:update', val);
+    if (this.creditsDigits) this.creditsDigits.setValue(val);
   }
+
   _debitBet(){
     const cost = Math.max(0, (this.stake|0) * (this.lines|0)); // total = stake/ligne × nb lignes
     if (cost > 0){
@@ -70,7 +72,7 @@ export class SlotMachine extends Phaser.Scene {
 
     // Limite à ~250 ticks max pour ne pas traîner trop longtemps
     const maxTicks = 250;
-    const step = Math.max(1, Math.ceil(amount / maxTicks));
+    const step = 1;
     const intervalMs = 16; // ~60 fps
 
     let cur = start;
@@ -113,39 +115,79 @@ export class SlotMachine extends Phaser.Scene {
   }
 
   // ----- Évaluation des gains (joker=0, runs contigus n'importe où) -----
+  // Calcule le payout total (joker=0, runs contigus n'importe où)
   _evaluatePayout(tops, stake=this.stake, lines=this.lines){
-    const rows = this._gridFromTops(tops);
-    const act  = (lines >= 3) ? [0,1,2] : [1];   // 3 lignes ou juste la du milieu
+    const hits = this._findWinningSegments(tops, lines);
     let total = 0;
+    for (const h of hits){
+      const mult = this.PAYTABLE[h.len] || 0;     // ex: {3:10, 4:50, 5:500}
+      total += mult * Math.max(1, stake|0);
+    }
+    return total;
+  }
 
-    const longestRunWithWild = (arr)=>{
-      let best = 0;
+
+  // Renvoie les segments gagnants sur les lignes actives
+  // -> [{ row, start, len }]
+  _findWinningSegments(tops, lines=this.lines){
+    const rows = this._gridFromTops(tops);              // [3][COLS]
+    const active = (lines >= 3) ? [0,1,2] : [1];        // 3 lignes ou juste la du milieu
+    const hits = [];
+
+    // plus long run contigu n'importe où, avec 0=wild
+    const bestRunWithWild = (arr)=>{
+      let bestLen=0, bestStart=-1;
       for (let s=0; s<=this.COLS-3; s++){
-        let match = null, len = 0, hasReal = false;
+        let match=null, len=0, hasReal=false;
         for (let c=s; c<this.COLS; c++){
           const sym = arr[c];
-          if (sym === 0){            // diamond = joker
+          if (sym === 0){                // joker → prolonge
             len++;
-          } else if (match === null || sym === match){
-            match = sym; len++; hasReal = true;
+          } else if (match===null || sym===match){
+            match=sym; len++; hasReal=true;
           } else {
             break;
           }
         }
-        if (hasReal) best = Math.max(best, len);
+        if (hasReal && len>bestLen){ bestLen=len; bestStart=s; }
       }
-      return best;
+      return { len:bestLen, start:bestStart };
     };
 
-    for (const r of act){
-      const len = longestRunWithWild(rows[r]); // 0..5
-      if (len >= 3){
-        const mult = this.PAYTABLE[len] || 0;  // 10 / 50 / 500
-        total += mult * Math.max(1, stake|0);  // échelle par mise/ligne
-      }
+    for (const r of active){
+      const { len, start } = bestRunWithWild(rows[r]);
+      if (len >= 3 && start >= 0) hits.push({ row:r, start, len });
     }
-    return total;
+    return hits;
   }
+
+
+  async _refreshCredits(){
+    try{
+      const me = await api('api/me');
+      if (me?.user && Number.isFinite(me.user.credits)) this._setCredits(me.user.credits);
+    }catch{}
+  }
+
+  // Essaye d'enregistrer le gain côté back
+  async _persistPayout(payout, tops){
+    if (!payout || payout <= 0) return;
+    try{
+      const r = await api('api/slot/settle', {
+        method:'POST',
+        body:{ payout, bet:this.stake, lines:this.lines, grid: tops }
+      });
+      // console.debug('settle', r);
+      if (Number.isFinite(r?.credits)) { this._setCredits(r.credits); return; }
+    }catch(e){
+      // console.warn('settle failed', e);
+    }
+  }
+
+
+
+
+
 
 
 
@@ -183,6 +225,28 @@ export class SlotMachine extends Phaser.Scene {
   // État de jeu basique (mise & lignes)
   lines = 1;
   bet   = 1;
+
+
+  _hl = [];
+  _clearHighlights(){ if(this._hl){ this._hl.forEach(o=>o.destroy()); this._hl.length=0; } }
+  _showHighlights(hits){
+    if(!hits?.length) return;
+    const { x, y, w, h } = this.win;
+    const reelW = (w - (this.COLS-1)*this.reelGapX)/this.COLS;
+    const cellH = h / this.ROWS;
+    hits.forEach(({row,start,len})=>{
+      for(let k=0;k<len;k++){
+        const c = start + k;
+        const cx = x + c*(reelW + this.reelGapX) + reelW/2;
+        const cy = y + (row+0.5)*cellH;
+        const r = this.add.rectangle(cx, cy, reelW*0.92, cellH*0.9, 0x00ff7f, 0.22)
+          .setDepth(450).setBlendMode(Phaser.BlendModes.ADD);
+        this.tweens.add({ targets:r, alpha:0.8, duration:160, yoyo:true, repeat:2, ease:'Sine.InOut' });
+        this._hl.push(r);
+      }
+    });
+  }
+
 
 
   /**
@@ -356,9 +420,10 @@ export class SlotMachine extends Phaser.Scene {
 
 
     // valeurs initiales
-    this.lines = 3;         // 3 lignes horizontales actives
-    this.bet   = this.bet ?? 3;
-    if (this.betDigits) this.betDigits.setValue(this.bet);
+    this.lines = 3;                 // 3 lignes actives
+    this.stake = this.stake ?? 1;   // 1 crédit / ligne
+    this.bet   = this.lines * this.stake;
+
 
 
     this.winDigits.setValue(0);
@@ -412,21 +477,20 @@ export class SlotMachine extends Phaser.Scene {
 
   // =================== SPIN (timeline robuste) ===================
   async _doSpin(){
+
+    // Audio (tolérant si tu as les helpers _add/_play)
+    this._play && this._play('spin_start',{volume:0.7});
+    this._spinLoop = this._add ? this._add('spin_loop',{loop:true,volume:0.35})
+                                   : this.sound.add('spin_loop',{loop:true,volume:0.35});
+    if(this._spinLoop) this._spinLoop.play();
+
     if(this.isSpinning) return;
     this.isSpinning = true;
     this.statusText.setText('Spinning…');
 
     // Débit local de la mise (avant l'API)
     this._debitBet();
-    const res = await api('api/slot/spin', { method:'POST', body:{ bet:this.bet, lines:this.lines } });
 
-
-
-    // Audio (tolérant si tu as les helpers _add/_play)
-    this._play && this._play('spin_start',{volume:0.7});
-    this._spinLoop = this._add ? this._add('spin_loop',{loop:true,volume:0.35})
-                               : this.sound.add('spin_loop',{loop:true,volume:0.35});
-    if(this._spinLoop) this._spinLoop.play();
 
     // Cible API -> fallback local
     let targetTops=[];
@@ -516,6 +580,13 @@ export class SlotMachine extends Phaser.Scene {
     }
 
 
+    // Surlignage des segments gagnants
+    const hits = this._findWinningSegments(targetTops, this.lines);
+    if (this._clearHighlights) this._clearHighlights();
+    if (this._showHighlights)  this._showHighlights(hits);
+
+
+
     // 2) SFX + digits WIN
     if (p >= 100) this._play('win_big',{volume:0.9});
     else if (p > 0) this._play('win_small',{volume:0.8});
@@ -526,13 +597,20 @@ export class SlotMachine extends Phaser.Scene {
     }
 
     // 3) Crédits finaux
-    if (Number.isFinite(this._pendingCredits)){
-      // l'API renvoie les crédits → on se cale dessus
+    // a) on applique le solde renvoyé par /spin (après débit)
+    if (Number.isFinite(this._pendingCredits)) {
       this._setCredits(this._pendingCredits);
-    } else if (p > 0){
-      // sinon on crédite localement avec animation
-      this._animateCreditGain(p);
     }
+
+    // b) si gain, on anime localement ET on crédite en DB via /api/slot/settle
+    if (p > 0) {
+      this._animateCreditGain(p); // animation +1 côté client
+      void this._persistPayout(p, targetTops).then(() => this._refreshCredits());
+    } else {
+      void this._refreshCredits(); // pas de gain : on reste calé au back
+    }
+
+
 
     // 4) Fin
     this.statusText.setText(`Top: ${targetTops.join(' ')}`);

@@ -6,7 +6,8 @@ import java.io.IOException;
 
 @WebServlet(urlPatterns = "/api/me")
 public class MeServlet extends HttpServlet {
-    @Override protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         resp.setContentType("application/json; charset=UTF-8");
         HttpSession s = req.getSession(false);
         if (s == null || s.getAttribute("user") == null) {
@@ -15,17 +16,17 @@ public class MeServlet extends HttpServlet {
             return;
         }
         String username = (String) s.getAttribute("user");
-        Integer credits = (Integer) s.getAttribute("credits");
 
-        // si pas en session, on recharge depuis la DB
-        if (credits == null) {
-            try {
-                UserDao.UserRow u = UserDao.getByUsername(username);
-                credits = (u != null ? u.credits : 0);
-                s.setAttribute("credits", credits);
-            } catch (java.sql.SQLException e) { credits = 0; }
+        int credits = 0;
+        try {
+            UserDao.UserRow u = UserDao.getByUsername(username);
+            credits = (u != null ? u.credits : 0);
+            s.setAttribute("credits", credits); // <-- MAJ de la session à chaque /me
+        } catch (java.sql.SQLException e) {
+            credits = 0;
         }
 
         resp.getWriter().write("{\"ok\":true,\"user\":{\"username\":\""+username+"\",\"credits\":"+credits+"}}");
     }
+
 }

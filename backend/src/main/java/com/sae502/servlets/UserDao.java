@@ -110,6 +110,55 @@ public class UserDao {
     }
 
 
+    // Renvoie le nouveau solde si le débit passe, sinon null (fonds insuffisants)
+    public static Integer debitCreditsIfEnough(int userId, int amount) throws SQLException {
+        if (amount <= 0) return getCredits(userId);
+        try (Connection c = DatabaseConnection.getConnection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement up = c.prepareStatement(
+                    "UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?")) {
+                up.setInt(1, amount);
+                up.setInt(2, userId);
+                up.setInt(3, amount);
+                int updated = up.executeUpdate();
+                if (updated == 0) { c.rollback(); return null; } // pas assez de crédits
+            }
+            int credits = getCreditsTx(c, userId);
+            c.commit();
+            return credits;
+        }
+    }
+
+    public static int addCredits(int userId, int amount) throws SQLException {
+        if (amount <= 0) return getCredits(userId);
+        try (Connection c = DatabaseConnection.getConnection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement up = c.prepareStatement(
+                    "UPDATE users SET credits = credits + ? WHERE id = ?")) {
+                up.setInt(1, amount);
+                up.setInt(2, userId);
+                up.executeUpdate();
+            }
+            int credits = getCreditsTx(c, userId);
+            c.commit();
+            return credits;
+        }
+    }
+
+    // Helpers
+    private static int getCreditsTx(Connection c, int userId) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("SELECT credits FROM users WHERE id = ?")) {
+            ps.setInt(1, userId);
+            try (ResultSet rs = ps.executeQuery()) { rs.next(); return rs.getInt(1); }
+        }
+    }
+
+    public static int getCredits(int userId) throws SQLException {
+        try (Connection c = DatabaseConnection.getConnection()) { return getCreditsTx(c, userId); }
+    }
+
+
+
 
     // Petit DTO interne
     public static class UserRow {
