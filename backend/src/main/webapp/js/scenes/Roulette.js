@@ -113,12 +113,6 @@ export class Roulette extends Phaser.Scene {
       if (spin) spin.setScale(0.15);
     }
 
-    // Bouton pour effacer toutes les mises courantes
-    const clear = this._imageBtn(W/2, H-60, 'clearBtn', async ()=>{
-      await this._clearBets(); this._toast('Mises effacées.');
-    });
-    if (clear) clear.setScale(0.4);
-
     // Paramètres de base pour la grille de numéros
     const cellW = 56;
     const cellH = 40;
@@ -145,26 +139,46 @@ export class Roulette extends Phaser.Scene {
 
     /**
      * Ajoute les deux boutons de jetons sous la table :
-     * - jeton rouge pour diminuer la mise,
-     * - jeton vert pour l'augmenter.
+     * - jeton rouge (diminue la mise) sous le 34,
+     * - bouton "clear" sous le 35,
+     * - jeton vert (augmente la mise) sous le 36.
      */
-    const placeBetButtons = ()=> {
+    const placeBetButtons = () => {
       const c34 = this.numCells[34];
-      //const c35 = this.numCells[35]
+      const c35 = this.numCells[35];
       const c36 = this.numCells[36];
-      if (!c34 || !c36) return; // Si la grille n'est pas encore prête, on retente au tick suivant
+      if (!c34 || !c35 || !c36) return; // Si la grille n'est pas encore prête, on retente plus tard
 
-      const yBelow = Math.max(c34.cy + c34.h/2, c36.cy + c36.h/2) + 18;
+      // On prend la ligne la plus basse des trois cases et on ajoute un petit offset
+      const yBelow = Math.max(
+        c34.cy + c34.h / 2,
+        c35.cy + c35.h / 2,
+        c36.cy + c36.h / 2
+      ) + 18;
 
-      const small_chip = this._imageBtn(c34.cx, yBelow, 'RedChipsBtnchip', ()=>{
-        this.betUnit = Math.max(10, this.betUnit-10);
-        this._setStatus(); this._toast(`Bet − : ${this.betUnit}`);
+      // Jeton rouge sous le 34 (miser moins)
+      const small_chip = this._imageBtn(c34.cx, yBelow, 'RedChipsBtnchip', () => {
+        this.betUnit = Math.max(10, this.betUnit - 10);
+        this._setStatus();
+        this._toast(`Bet − : ${this.betUnit}`);
       });
       if (small_chip) small_chip.setScale(0.03).setDepth(60);
 
-      const big_chip = this._imageBtn(c36.cx, yBelow, 'GreenChipsBtn', ()=>{
+      // Bouton CLEAR sous le 35
+      const clearBtn = this._imageBtn(c35.cx, yBelow, 'clearBtn', () => {
+        // On affiche le message tout de suite
+        this._toast('Mises effacées.');
+
+        // On lance le nettoyage des mises (asynchrone, mais on ne l’attend pas ici)
+        this._clearBets().catch(()=>{});
+      });
+      if (clearBtn) clearBtn.setScale(0.3).setDepth(60);
+
+      // Jeton vert sous le 36 (miser plus)
+      const big_chip = this._imageBtn(c36.cx, yBelow, 'GreenChipsBtn', () => {
         this.betUnit += 10;
-        this._setStatus(); this._toast(`Bet + : ${this.betUnit}`);
+        this._setStatus();
+        this._toast(`Bet + : ${this.betUnit}`);
       });
       if (big_chip) big_chip.setScale(0.03).setDepth(60);
     };
@@ -185,7 +199,7 @@ export class Roulette extends Phaser.Scene {
 
     // Dimensions de la grille pour placer les boutons à côté
     const gridHeight = 12 * cellH + 11 * gap;
-    const sideX = tableLeft + cellW + gap + tableWidth + 40; // à droite de la grille des 1–36
+    const sideX = tableLeft + cellW + gap + tableWidth + 48; // à droite de la grille des 1–36
     const baseY = top + cellH / 2;
     const stepY = gridHeight / (quicks.length - 1);
 
@@ -200,12 +214,12 @@ export class Roulette extends Phaser.Scene {
     });
 
     // Boutons pour les douzaines et les colonnes (mises de type DOZEN / COLUMN)
-    this._btn(24,       24+56,      'Dozen 1',  async ()=> this._placeParamBet('DOZEN',1));
-    this._btn(24+100,   24+56,      'Dozen 2',  async ()=> this._placeParamBet('DOZEN',2));
-    this._btn(24+200,   24+56,      'Dozen 3',  async ()=> this._placeParamBet('DOZEN',3));
-    this._btn(24,       24+56+40,   'Column 1', async ()=> this._placeParamBet('COLUMN',1));
-    this._btn(24+100,   24+56+40,   'Column 2', async ()=> this._placeParamBet('COLUMN',2));
-    this._btn(24+200,   24+56+40,   'Column 3', async ()=> this._placeParamBet('COLUMN',3));
+    this._btn(100,       24+56,      'Dozen 1',  async ()=> this._placeParamBet('DOZEN',1));
+    this._btn(100+100,   24+56,      'Dozen 2',  async ()=> this._placeParamBet('DOZEN',2));
+    this._btn(100+200,   24+56,      'Dozen 3',  async ()=> this._placeParamBet('DOZEN',3));
+    this._btn(100,       24+56+40,   'Column 1', async ()=> this._placeParamBet('COLUMN',1));
+    this._btn(100+100,   24+56+40,   'Column 2', async ()=> this._placeParamBet('COLUMN',2));
+    this._btn(100+200,   24+56+40,   'Column 3', async ()=> this._placeParamBet('COLUMN',3));
 
     // Lecture de l'état initial (solde, mises, dernier tirage) auprès de l'API
     this._setStatus();
@@ -277,13 +291,36 @@ export class Roulette extends Phaser.Scene {
    * @param {number} [w=120] largeur du bouton
    * @returns {Phaser.GameObjects.Container} conteneur du bouton
    */
-  _btn(x,y,label,on,w=120){
-    const c = this.add.container(x,y);
-    const bg = this.add.rectangle(0,0,w,30,0x14253a).setStrokeStyle(1,0x6fb1ff).setInteractive({useHandCursor:true});
-    const tx = this.add.text(0,0,label,{fontFamily:'monospace',fontSize:14,color:'#eaffff'}).setOrigin(0.5);
-    bg.on('pointerdown',()=> bg.setScale(0.98));
-    bg.on('pointerup',()=>{ bg.setScale(1); on&&on(); });
-    c.add([bg,tx]); return c;
+  _btn(x, y, label, on, w = 90) {
+    const c = this.add.container(x, y);
+
+    // Couleur par défaut
+    let bgColor = 0x14253a;
+    let textColor = '#eaffff';
+
+    // Cas particuliers : RED et BLACK
+    if (label === 'RED') {
+      bgColor = 0xb00000;   // rouge
+    }
+    if (label === 'BLACK') {
+      bgColor = 0x000000;   // noir
+    }
+
+    const bg = this.add.rectangle(0, 0, w, 60, bgColor)
+      .setStrokeStyle(1, 0x6fb1ff)
+      .setInteractive({ useHandCursor: true });
+
+    const tx = this.add.text(0, 0, label, {
+      fontFamily: 'monospace',
+      fontSize: 14,
+      color: textColor
+    }).setOrigin(0.5);
+
+    bg.on('pointerdown', () => bg.setScale(0.98));
+    bg.on('pointerup', () => { bg.setScale(1); on && on(); });
+
+    c.add([bg, tx]);
+    return c;
   }
 
   /**
