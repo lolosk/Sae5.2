@@ -1,68 +1,94 @@
 // js/scenes/Roulette.js
 import { api } from '../utils/api.js';
 
+/**
+ * Scène Phaser gérant le jeu de roulette.
+ * Cette scène s'occupe :
+ * - du chargement des assets graphiques,
+ * - de l'affichage de la table, de la roue et des jetons,
+ * - de la gestion des mises et du solde joueur,
+ * - de la communication avec l'API backend (état, mises, tirage).
+ */
 export class Roulette extends Phaser.Scene {
+
+  /**
+   * Crée une nouvelle instance de scène "Roulette".
+   * Le nom "Roulette" est utilisé pour référencer cette scène dans Phaser.
+   */
   constructor(){ super('Roulette'); }
 
+  /**
+   * Précharge toutes les images nécessaires à la scène de roulette.
+   * On ne charge que les textures qui ne sont pas déjà présentes dans Phaser.
+   */
   preload(){
     const L = (k,p)=>{ if(!this.textures.exists(k)) this.load.image(k,p); };
 
-    // Décor / UI
+    // Images de décor et d'interface (fond, boutons principaux)
     L('rouletteBg',        'assets/roulette/bgRoulette.png');
     L('spinBtn',           'assets/roulette/spin-roulette.png');
-    L('clearBtn',          'assets/roulette/clear.png'); // nouveau (fallback bouton texte si absent)
+    L('clearBtn',          'assets/roulette/clear.png'); // Bouton pour effacer les mises
 
-    // Jetons (utilisés pour Bet -/+)
+    // Jetons (boutons visuels pour ajuster la mise de base)
     L('GreenChipsBtn',     'assets/roulette/green-chips.png');
     L('RedChipsBtnchip',   'assets/roulette/red-chips.png');
 
-    // Roue + curseur
+    // Roue et curseur statique
     L('RouletteWheel_bg',  'assets/roulette/roulette_wheel_bg.png');
-    L('RouletteWheel',     'assets/roulette/roulette_wheel.png'); // si absent, fallback sur _bg
+    L('RouletteWheel',     'assets/roulette/roulette_wheel.png');
     L('StaticCursor',      'assets/roulette/triangle.png');
 
-    // Panneau
+    // Panneau affichant le détail des mises
     L('panel',             'assets/roulette/panel.png');
   }
 
+  /**
+   * Point d'entrée de la scène.
+   * Installe tout ce qui est visible à l'écran :
+   * - fond, texte de statut,
+   * - roue, table de mise, boutons de pari rapide,
+   * - panneau de récapitulatif des mises.
+   */
   create(){
-    // Compat Phaser 3.5x+
+    // Récupération des dimensions utiles de la scène
     const W = this.scale.width;
     const H = this.scale.height;
     this.cameras.main.setBackgroundColor('#0d1117');
 
-    // Fond
+    // Affichage du fond (si l'image a bien été chargée)
     if (this.textures.exists('rouletteBg')) {
       this.add.image(W/2, H/2, 'rouletteBg').setDisplaySize(W, H);
     }
 
-    // État local
+    // Variables locales de jeu
     this.betUnit = 10;
     this.localBets = [];
 
-    // --- chips overlay ---
+    // Conteneur dédié à l'affichage des jetons sur la table
     this.numCells = {};                 // n -> {cx, cy, w, h}
     this.chipsByNumber = new Map();     // n -> Image[]
     this.chipsLayer = this.add.container(0,0).setDepth(50);
 
-
+    // Types de mises qui nécessitent un paramètre numérique
     this.needsParam = t => ['STRAIGHT','DOZEN','COLUMN'].includes(t);
 
-    // Bandeau statut
+    // Texte de statut en haut de l'écran (rappelle la mise de base)
     this.status = this.add.text(W/2, 14, 'Mise de base minimale : 10', {
       fontFamily:'monospace', fontSize:18, color:'#e6f1ff'
     }).setOrigin(0.5,0);
 
-    // Solde + dernier résultat
+    // Solde actuel + dernier tirage connu
     this.balanceTxt = this.add.text(16, 16, 'Solde: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
     this.balance = 0;
     this.lastTxt    = this.add.text(16, 40, 'Dernier: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
+
+    // Petit texte explicatif pour les boutons de jetons
     this.BetTxt    = this.add.text(16, 700, '*Jeton vert (réduire mise), jeton rouge (augmenter mise)', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
 
-    // Roue à droite
+    // Création de la roue et de son curseur à droite de l'écran
     this._buildWheel(W, H);
 
-    // Panneau des mises
+    // Mise en place du panneau récapitulatif des mises
     const panelW = Math.min(360, W*0.32), panelH = Math.min(240, H*0.35);
     const panelX = W - panelW/2 - 16, panelY = 16 + panelH/2;
     if (this.textures.exists('panel')) {
@@ -74,64 +100,59 @@ export class Roulette extends Phaser.Scene {
       fontFamily:'monospace', fontSize:14, color:'#e6f1ff', wordWrap:{ width: panelW-24 }
     }).setDepth(31);
 
+    // Bouton "Spin" : lance un tirage de roulette via le backend
+    if (this.wheel) {
+      const wheelBottom = this.wheelGroup.y + (this.wheel.displayHeight / 2);
 
-    // Spin & Clear
-    const spin = this._imageBtn(W/2, H-110, 'spinBtn', async ()=>{ await this._doSpin(); });
-    if (spin) spin.setScale(0.15);
+      const spin = this._imageBtn(
+        this.wheelGroup.x,          // centré sous la roue
+        wheelBottom + 100,           // 60 px sous la roue (ajuste comme tu veux)
+        'spinBtn',
+        async ()=>{ await this._doSpin(); }
+      );
+      if (spin) spin.setScale(0.15);
+    }
 
+    // Bouton pour effacer toutes les mises courantes
     const clear = this._imageBtn(W/2, H-60, 'clearBtn', async ()=>{
       await this._clearBets(); this._toast('Mises effacées.');
     });
     if (clear) clear.setScale(0.4);
 
-    // Raccourcis (pari rapides)
-    const quicks = [
-      {label:'RED',   type:'RED'},
-      {label:'BLACK', type:'BLACK'},
-      {label:'EVEN',  type:'EVEN'},
-      {label:'ODD',   type:'ODD'},
-      {label:'1-18',  type:'LOW'},
-      {label:'19-36', type:'HIGH'}
-    ];
-    const qY = H-150, qStart = 24, qGap = 86;
-    quicks.forEach((q,i)=>{
-      this._btn(qStart + i*qGap, qY, q.label, async ()=>{
-        try{
-          await this._addBet({ type:q.type, amount:this.betUnit });
-          this._toast(`Mise ${q.label} +${this.betUnit}`);
-        }catch{}
-      }, 80);
-    });
-
-    // Grille 0..36 (clic = plein)
+    // Paramètres de base pour la grille de numéros
     const cellW = 56;
     const cellH = 40;
     const gap   = 6;
 
-    // Calcul automatique pour centrer
+    // Calcul de la largeur de la grille et position horizontale (avec un léger décalage à gauche)
     const tableWidth = 3 * cellW + 2 * gap;
-    const tableLeft  = (W - tableWidth) / 2 - 250; // décallage à gauche
+    const tableLeft  = (W - tableWidth) / 2 - 250; // décalage à gauche pour laisser la place à la roue
 
-    // Position de départ en hauteur
+    // Position verticale de départ pour la table
     const top = 100;
 
-    // Grille centrée
+    // Objet de configuration pour la grille
     const grid = {
-        left: tableLeft,
-        top: top,
-        cellW: cellW,
-        cellH: cellH,
-        gap: gap
+      left:  tableLeft,
+      top:   top,
+      cellW: cellW,
+      cellH: cellH,
+      gap:   gap
     };
 
+    // Construction de la grille 0..36
     this._buildNumberGrid(grid);
 
-
-    // mettre les types de mises sous la table
-    const placeBetButtons = ()=>{
+    /**
+     * Ajoute les deux boutons de jetons sous la table :
+     * - jeton rouge pour diminuer la mise,
+     * - jeton vert pour l'augmenter.
+     */
+    const placeBetButtons = ()=> {
       const c34 = this.numCells[34];
+      //const c35 = this.numCells[35]
       const c36 = this.numCells[36];
-      if (!c34 || !c36) return; // sécurité : si pas encore prêts, on réessaie au tick suivant
+      if (!c34 || !c36) return; // Si la grille n'est pas encore prête, on retente au tick suivant
 
       const yBelow = Math.max(c34.cy + c34.h/2, c36.cy + c36.h/2) + 18;
 
@@ -148,27 +169,55 @@ export class Roulette extends Phaser.Scene {
       if (big_chip) big_chip.setScale(0.03).setDepth(60);
     };
 
-    // Appel immédiat + re-try au tick suivant si nécessaire
+    // On essaie d'ajouter les boutons immédiatement puis une fois la grille finalisée
     placeBetButtons();
     this.time.delayedCall(0, placeBetButtons);
 
+    // --- Boutons RED / BLACK / EVEN / ODD / 1-18 / 19-36 sur le côté du tapis ---
+    const quicks = [
+      { label: '1-18',  type: 'LOW'  },
+      { label: 'EVEN',  type: 'EVEN' },
+      { label: 'RED',   type: 'RED'  },
+      { label: 'BLACK', type: 'BLACK'},
+      { label: 'ODD',   type: 'ODD'  },
+      { label: '19-36', type: 'HIGH' }
+    ];
 
+    // Dimensions de la grille pour placer les boutons à côté
+    const gridHeight = 12 * cellH + 11 * gap;
+    const sideX = tableLeft + cellW + gap + tableWidth + 40; // à droite de la grille des 1–36
+    const baseY = top + cellH / 2;
+    const stepY = gridHeight / (quicks.length - 1);
 
-    // Dozens / Columns
+    quicks.forEach((q, i) => {
+      const y = baseY + i * stepY;
+      this._btn(sideX, y, q.label, async () => {
+        try{
+          await this._addBet({ type:q.type, amount:this.betUnit });
+          this._toast(`Mise ${q.label} +${this.betUnit}`);
+        }catch{}
+      }, 90);
+    });
+
+    // Boutons pour les douzaines et les colonnes (mises de type DOZEN / COLUMN)
     this._btn(24,       24+56,      'Dozen 1',  async ()=> this._placeParamBet('DOZEN',1));
     this._btn(24+100,   24+56,      'Dozen 2',  async ()=> this._placeParamBet('DOZEN',2));
     this._btn(24+200,   24+56,      'Dozen 3',  async ()=> this._placeParamBet('DOZEN',3));
     this._btn(24,       24+56+40,   'Column 1', async ()=> this._placeParamBet('COLUMN',1));
     this._btn(24+100,   24+56+40,   'Column 2', async ()=> this._placeParamBet('COLUMN',2));
     this._btn(24+200,   24+56+40,   'Column 3', async ()=> this._placeParamBet('COLUMN',3));
-    this._btn(24+200,   24+56+40,   'Column 3', async ()=> this._placeParamBet('COLUMN',3));
 
-    // Init
+    // Lecture de l'état initial (solde, mises, dernier tirage) auprès de l'API
     this._setStatus();
     this._getState().catch(()=>{});
   }
 
-  // ---------- Construction roue ----------
+
+  /**
+   * Construit la roue de roulette et le curseur sur le côté droit de l'écran.
+   * @param {number} W largeur de la zone de jeu
+   * @param {number} H hauteur de la zone de jeu
+   */
   _buildWheel(W,H){
     const rightMargin = 16;
     const wheelAreaW = Math.min(W*0.42, W*0.5);
@@ -178,51 +227,56 @@ export class Roulette extends Phaser.Scene {
 
     this.wheelGroup = this.add.container(wheelX, wheelY);
 
-    // 1) Crée la roue qui TOURNE
+    // Image principale de la roue qui sera animée lors du tirage
     this.wheel = null;
     if (this.textures.exists('RouletteWheel')){
       this.wheel = this.add.image(0,0,'RouletteWheel');
       const s2 = Math.min(maxSize*0.96/this.wheel.width, maxSize*0.96/this.wheel.height);
       this.wheel.setScale(s2);
-      this.wheelGroup.add(this.wheel); // ajoutée AVANT le hub si on veut le hub DEVANT
+      this.wheelGroup.add(this.wheel);
     } else {
-      // fallback visuel si l'asset n'existe pas
+      // Si la texture n'est pas disponible, on dessine un cercle simple pour garder un repère visuel
       const r = this.add.circle(0,0, Math.floor(maxSize*0.45), 0x444444);
       this.wheelGroup.add(r);
     }
 
-    // 2) Ajoute le "moyeu" centré (fixe). IMPORTANT : ordre d'ajout !
+    // Ajout du "moyeu" au centre (image décorative)
     if (this.textures.exists('RouletteWheel_bg')){
       const hub = this.add.image(0,0,'RouletteWheel_bg');
 
-      // Taille ~32% du diamètre de la roue
+      // Ajustement de la taille du moyeu par rapport au diamètre de la roue
       const refW = this.wheel ? this.wheel.displayWidth : maxSize;
-      const ratio = 1.10; // ajuste entre 0.25 et 0.45
+      const ratio = 1.3;
       const target = refW * ratio;
       const sHub = Math.min(target / hub.width, target / hub.height);
       hub.setScale(sHub);
 
-      // Si tu veux que le hub soit DEVANT la roue :
-      // this.wheelGroup.add(hub);
-
-      // Si ton hub est opaque et recouvre tout, mets-le DERRIÈRE la roue :
+      // Le moyeu est placé derrière la roue pour ne pas cacher ses cases
       this.wheelGroup.addAt(hub, 0);
     }
 
-    // 3) Curseur au-dessus
+    // Curseur statique qui indique la case gagnante lorsque la roue s'arrête
     if (this.textures.exists('StaticCursor')){
       const ref = this.wheel;
       const radius = ref ? (ref.displayWidth/2) : (maxSize/2);
-      const cursor = this.add.image(0, -radius - 14, 'StaticCursor');
+      const cursor = this.add.image(0, -radius - 0, 'StaticCursor');
       if (cursor.width && cursor.height){
-        const cs = Math.min(28/cursor.width, 28/cursor.height);
+        const cs = Math.min(40/cursor.width, 40/cursor.height);
         cursor.setScale(cs);
       }
-      this.wheelGroup.add(cursor); // ajouté en dernier ⇒ au-dessus
+      this.wheelGroup.add(cursor);
     }
   }
 
-  // ---------- UI helpers ----------
+  /**
+   * Crée un bouton rectangulaire simple avec un label centré.
+   * @param {number} x position X
+   * @param {number} y position Y
+   * @param {string} label texte à afficher
+   * @param {Function} on callback appelé au clic
+   * @param {number} [w=120] largeur du bouton
+   * @returns {Phaser.GameObjects.Container} conteneur du bouton
+   */
   _btn(x,y,label,on,w=120){
     const c = this.add.container(x,y);
     const bg = this.add.rectangle(0,0,w,30,0x14253a).setStrokeStyle(1,0x6fb1ff).setInteractive({useHandCursor:true});
@@ -231,10 +285,20 @@ export class Roulette extends Phaser.Scene {
     bg.on('pointerup',()=>{ bg.setScale(1); on&&on(); });
     c.add([bg,tx]); return c;
   }
+
+  /**
+   * Crée un bouton basé sur une image si la texture existe,
+   * sinon bascule sur un bouton rectangulaire classique avec le même label.
+   * @param {number} x position X
+   * @param {number} y position Y
+   * @param {string} key clé de texture Phaser
+   * @param {Function} on callback appelé au clic
+   * @returns {Phaser.GameObjects.Image|Phaser.GameObjects.Container} bouton image ou bouton de secours
+   */
   _imageBtn(x,y,key,on){
     if(this.textures.exists(key)){
       const node = this.add.image(x,y,key).setInteractive({useHandCursor:true});
-      // anime toujours autour de l'échelle courante (quel que soit le setScale appliqué après)
+      // Animation légère au clic pour donner un retour visuel
       node.on('pointerdown', ()=> node.setScale(node.scale * 0.96));
       node.on('pointerup',   ()=> { node.setScale(node.scale / 0.96); on&&on(); });
       return node;
@@ -243,53 +307,117 @@ export class Roulette extends Phaser.Scene {
       return this._btn(x,y,key, on, 120);
     }
   }
+
+  /**
+   * Met à jour le message affiché dans la zone de statut.
+   * @param {string} [t] texte à afficher, ou message par défaut si omis
+   */
   _setStatus(t){ if(this.status && this.status.setText) this.status.setText(t || `Bet: ${this.betUnit}`); }
+
+  /**
+   * Formatte une valeur numérique en euros avec deux décimales.
+   * @param {number} n montant
+   * @returns {string} montant formaté (ex: "10.00 €")
+   */
   _euro(n){ return Number(n).toFixed(2) + ' €'; }
+
+  /**
+   * Affiche un message temporaire dans la zone de statut puis rétablit le texte par défaut.
+   * @param {string} t message à afficher brièvement
+   */
   _toast(t){
     this._setStatus(t);
     this.time.delayedCall(900, ()=> this._setStatus(), null, this);
   }
 
-  // --- Balance helpers (local truth) ---
+  // --- Gestion du solde en local (vue côté client) ---
+
+  /**
+   * Initialise le solde local du joueur.
+   * @param {number} n valeur initiale du solde
+   */
   _initBalance(n){
     this.balanceVal = Number(n) || 0;
     if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balanceVal));
   }
+
+  /**
+   * Ajoute un montant positif au solde local.
+   * @param {number} n montant à créditer
+   */
   _applyCredit(n){
     this.balanceVal = (Number(this.balanceVal)||0) + (Number(n)||0);
     if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balanceVal));
   }
+
+  /**
+   * Retire un montant du solde local si les fonds sont suffisants.
+   * @param {number} n montant à débiter
+   * @returns {boolean} true si le débit a été effectué, false sinon
+   */
   _applyDebit(n){
     n = Number(n)||0;
-    if ((Number(this.balanceVal)||0) < n) return false; // fonds insuffisants
+    if ((Number(this.balanceVal)||0) < n) return false;
     this.balanceVal -= n;
     if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balanceVal));
     return true;
   }
+
+  /**
+   * Calcule la somme de toutes les mises actuellement enregistrées localement.
+   * @returns {number} total des mises
+   */
   _currentStake(){
     return this.localBets.reduce((t,b)=> t + Number(b.amount||0), 0);
   }
 
-
+  /**
+   * Met à jour la variable de solde principale utilisée pour l'affichage.
+   * @param {number} v nouveau solde
+   */
   _setBalance(v){
     this.balance = Math.max(0, Number(v) || 0);
     if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balance));
   }
+
+  /**
+   * Indique si le joueur peut miser un certain montant au vu de son solde.
+   * @param {number} amt montant à miser
+   * @returns {boolean} true si le solde est suffisant
+   */
   _canStake(amt){ return this.balance >= Number(amt || 0); }
+
+  /**
+   * Débite le solde principal d'un certain montant.
+   * @param {number} amt montant à débiter
+   */
   _applyDebit(amt){ this._setBalance(this.balance - Number(amt || 0)); }
+
+  /**
+   * Crédite le solde principal d'un certain montant.
+   * @param {number} amt montant à créditer
+   */
   _applyCredit(amt){ this._setBalance(this.balance + Number(amt || 0)); }
+
+  /**
+   * Recalcule le montant total actuellement engagé dans les mises locales.
+   * @returns {number} total des mises
+   */
   _currentStake(){
     return this.localBets.reduce((s,b)=> s + Number(b.amount || 0), 0);
   }
 
-  // ---------- Grille numéros ----------
+  /**
+   * Construit la grille de numéros de 0 à 36.
+   * @param {Object} param0 configuration (left, top, cellW, cellH, gap)
+   */
   _buildNumberGrid({ left, top, cellW, cellH, gap }){
-    // 0
+    // Case spéciale pour le 0, placée à gauche
     this._registerCell(0, left, top, cellW, cellH);
     const zero = this._gridCell(left, top, cellW, cellH, '0', 0x0aa44a);
     zero.on('pointerup', async ()=>{ await this._placeStraight(0); });
 
-    // 1..36
+    // Construction des numéros 1 à 36 en 3 colonnes et 12 lignes
     const reds = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
     for(let row=0; row<12; row++){
       for(let col=0; col<3; col++){
@@ -304,6 +432,16 @@ export class Roulette extends Phaser.Scene {
     }
   }
 
+  /**
+   * Crée une case de la table (rectangle + texte) et retourne le rectangle interactif.
+   * @param {number} x position X
+   * @param {number} y position Y
+   * @param {number} w largeur
+   * @param {number} h hauteur
+   * @param {string} label texte à afficher (numéro)
+   * @param {number} bgColor couleur de fond
+   * @returns {Phaser.GameObjects.Rectangle} rectangle cliquable
+   */
   _gridCell(x,y,w,h,label,bgColor){
     const c = this.add.container(x + w/2, y + h/2).setSize(w,h);
     const r = this.add.rectangle(0,0,w,h,bgColor).setStrokeStyle(1,0x6fb1ff).setInteractive({useHandCursor:true});
@@ -314,55 +452,77 @@ export class Roulette extends Phaser.Scene {
     return r;
   }
 
-   _registerCell(n, x, y, w, h){
-     this.numCells[n] = { cx: x + w/2, cy: y + h/2, w, h };
-   }
+  /**
+   * Mémorise les coordonnées et dimensions d'une case de la table pour pouvoir y placer des jetons.
+   * @param {number} n numéro de la case (0..36)
+   * @param {number} x position X d'origine
+   * @param {number} y position Y d'origine
+   * @param {number} w largeur
+   * @param {number} h hauteur
+   */
+  _registerCell(n, x, y, w, h){
+    this.numCells[n] = { cx: x + w/2, cy: y + h/2, w, h };
+  }
 
-   // ---------- Chips (affichage) ----------
-   _addChipOnNumber(n){
-     const cell = this.numCells[n]; if (!cell) return;
-     if (!this.chipsByNumber.has(n)) this.chipsByNumber.set(n, []);
-     const stack = this.chipsByNumber.get(n);
+  /**
+   * Ajoute un jeton visuel sur une case donnée en l'empilant avec les précédents.
+   * @param {number} n numéro de case ciblée
+   */
+  _addChipOnNumber(n){
+    const cell = this.numCells[n]; if (!cell) return;
+    if (!this.chipsByNumber.has(n)) this.chipsByNumber.set(n, []);
+    const stack = this.chipsByNumber.get(n);
 
-     const key = (stack.length % 2 === 0) ? 'GreenChipsBtn' : 'RedChipsBtnchip';
-     const chip = this.add.image(cell.cx, cell.cy, key);
-     this.chipsLayer.add(chip);
+    const key = (stack.length % 2 === 0) ? 'GreenChipsBtn' : 'RedChipsBtnchip';
+    const chip = this.add.image(cell.cx, cell.cy, key);
+    this.chipsLayer.add(chip);
 
-     // scale auto en fonction de la case
-     const target = Math.min(cell.w, cell.h) * 0.78;
-     const base = Math.max(chip.width || 64, chip.height || 64);
-     chip.setScale(target / base);
+    // Mise à l'échelle automatique pour que le jeton tienne dans la case
+    const target = Math.min(cell.w, cell.h) * 0.78;
+    const base = Math.max(chip.width || 64, chip.height || 64);
+    chip.setScale(target / base);
 
-     // léger décalage pour l'empilement
-     const off = Math.min(cell.w, cell.h) * 0.14;
-     const col = stack.length % 3;
-     const row = Math.floor(stack.length / 3);
-     chip.x += (col - 1) * off;
-     chip.y -= row * (off * 0.9);
+    // Décalage léger pour simuler une pile de jetons
+    const off = Math.min(cell.w, cell.h) * 0.14;
+    const col = stack.length % 3;
+    const row = Math.floor(stack.length / 3);
+    chip.x += (col - 1) * off;
+    chip.y -= row * (off * 0.9);
 
-     // petite anim
-     chip.setAlpha(0).setScale(chip.scale * 0.8);
-     this.tweens.add({ targets: chip, alpha:1, scale: chip.scale/0.8, duration:120, ease:'Cubic.Out' });
+    // Petite animation d'apparition
+    chip.setAlpha(0).setScale(chip.scale * 0.8);
+    this.tweens.add({ targets: chip, alpha:1, scale: chip.scale/0.8, duration:120, ease:'Cubic.Out' });
 
-     stack.push(chip);
-   }
+    stack.push(chip);
+  }
 
-   _clearChips(){
-     for (const [,list] of this.chipsByNumber){ list.forEach(s=> s.destroy()); }
-     this.chipsByNumber.clear();
-   }
+  /**
+   * Supprime tous les jetons visuels de la table.
+   */
+  _clearChips(){
+    for (const [,list] of this.chipsByNumber){ list.forEach(s=> s.destroy()); }
+    this.chipsByNumber.clear();
+  }
 
-   _rebuildChipsFromLocalBets(){
-     this._clearChips();
-     for (const b of this.localBets){
-       if (b.type === 'STRAIGHT' && b.param != null){
-         const count = Math.max(1, Number(b.amount) | 0);
-         for (let i=0;i<count;i++) this._addChipOnNumber(b.param);
-       }
-     }
-   }
+  /**
+   * Reconstruit l'affichage des jetons à partir de la liste des mises locales.
+   */
+  _rebuildChipsFromLocalBets(){
+    this._clearChips();
+    for (const b of this.localBets){
+      if (b.type === 'STRAIGHT' && b.param != null){
+        const count = Math.max(1, Number(b.amount) | 0);
+        for (let i=0;i<count;i++) this._addChipOnNumber(b.param);
+      }
+    }
+  }
 
-  // ---------- API wrappers (fallback local si serveur HS) ----------
+  /**
+   * Récupère l'état de jeu auprès du backend :
+   * - solde,
+   * - liste de mises en cours,
+   * - dernier tirage.
+   */
   async _getState(){
     try{
       const s = await api('api/roulette/state', { method:'GET' });
@@ -379,11 +539,16 @@ export class Roulette extends Phaser.Scene {
         this.lastTxt.setText(`Dernier: ${number} (${String(color).toUpperCase()})`);
       }
     }catch(e){
-      // Pas de serveur : démarre avec un solde fictif
+      // Si le serveur n'est pas joignable, on part sur un solde fictif local
       this._setBalance(1000);
     }
   }
 
+  /**
+   * Ajoute une mise (plein, dozen, colonne, etc.) côté client et côté serveur.
+   * Gère aussi le débit du solde local.
+   * @param {Object} params informations de mise (type, amount, param)
+   */
   async _addBet({ type, amount, param }){
     const body = { type, amount:Number(amount) };
     const stake = Number(amount);
@@ -405,7 +570,7 @@ export class Roulette extends Phaser.Scene {
       this._renderBets();
       if (type==='STRAIGHT' && param!=null) this._addChipOnNumber(param);
     }catch(e){
-      // Fallback local
+      // Si la requête échoue, on garde au moins la logique locale des mises
       this.localBets.push({ type, amount:Number(amount), param: param ?? null });
       this._renderBets();
       if (type==='STRAIGHT' && param!=null) this._addChipOnNumber(param);
@@ -413,14 +578,18 @@ export class Roulette extends Phaser.Scene {
     }
   }
 
+  /**
+   * Efface toutes les mises courantes.
+   * Si des mises étaient engagées, on crédite le solde local du montant total remboursé.
+   */
   async _clearBets(){
-    // on calcule le remboursement AVANT de vider les mises
+    // On calcule d'abord ce qu'il faut rendre au joueur
     const refund = this._currentStake();
 
     try {
       await api('api/roulette/bets', { method:'DELETE' });
     } catch (e) {
-      // optionnel: console.warn('DELETE bets failed', e);
+      // En cas d'erreur côté serveur, on continue quand même à nettoyer la vue
     } finally {
       if (refund > 0) this._applyCredit(refund);
       this.localBets = [];
@@ -430,12 +599,18 @@ export class Roulette extends Phaser.Scene {
     }
   }
 
+  /**
+   * Lance un tour de roulette :
+   * - démarre l'animation de la roue,
+   * - interroge l'API pour connaître le résultat,
+   * - met à jour solde, dernier tirage et affichage des mises.
+   */
   async _doSpin(){
     if (this._spinning) return;
     this._spinning = true;
     this._setStatus('Spinning...');
 
-    // Animation roue (si asset dispo)
+    // Animation de la roue : on lui ajoute deux tours complets + un angle aléatoire
     const tweenPromise = this.wheel ? new Promise(res=>{
       const extra = Phaser.Math.Between(0, 359);
       this.tweens.add({
@@ -462,7 +637,7 @@ export class Roulette extends Phaser.Scene {
       else { this._setStatus('No win'); }
       this.game.events.emit('credits:update', r.balance);
     } catch(e){
-      // Fallback offline : tirage local
+      // Mode dégradé sans serveur : tirage local pour garder un comportement jouable
       const n = Phaser.Math.Between(0,36);
       const reds = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
       const color = (n===0) ? 'green' : (reds.has(n)?'red':'black');
@@ -475,13 +650,22 @@ export class Roulette extends Phaser.Scene {
     this._spinning = false;
   }
 
-  // ---------- Actions haut niveau ----------
+  /**
+   * Ajoute une mise pleine (numéro unique).
+   * @param {number} n numéro misé
+   */
   async _placeStraight(n){
     try{
       await this._addBet({ type:'STRAIGHT', amount:this.betUnit, param:n });
       this._toast(`Plein ${n} +${this.betUnit}`);
     }catch(e){ this._toast('Mise enregistrée (offline)'); }
   }
+
+  /**
+   * Ajoute une mise paramétrée (douzaine, colonne, etc.).
+   * @param {string} type type de mise (DOZEN, COLUMN, ...)
+   * @param {number} param paramètre de la mise (numéro de colonne, numéro de douzaine, etc.)
+   */
   async _placeParamBet(type, param){
     try{
       await this._addBet({ type, amount:this.betUnit, param });
@@ -489,7 +673,10 @@ export class Roulette extends Phaser.Scene {
     }catch(e){ this._toast('Mise enregistrée (offline)'); }
   }
 
-  // ---------- Rendu des mises ----------
+  /**
+   * Met à jour le texte du panneau de récapitulatif des mises.
+   * Affiche chaque mise et le total engagé.
+   */
   _renderBets(){
     if(this.localBets.length===0){ this.betsTxt.setText('Aucune mise.'); return; }
     let total = 0;
@@ -501,7 +688,9 @@ export class Roulette extends Phaser.Scene {
     this.betsTxt.setText(lines.join('\n'));
   }
 
-  // ---------- Effet gain ----------
+  /**
+   * Affiche un flash vert transparent sur tout l'écran pour signaler un gain.
+   */
   _flashWin(){
     const W = this.scale.width, H = this.scale.height;
     const r = this.add.rectangle(W/2, H/2, W, H, 0x00ff88, 0.12).setDepth(999);
