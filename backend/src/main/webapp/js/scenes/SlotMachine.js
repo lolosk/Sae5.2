@@ -4,271 +4,384 @@ import { api } from '../utils/api.js';
 export class SlotMachine extends Phaser.Scene {
   constructor(){ super('SlotMachine'); }
 
-  // ----------------------------------------------------
-  // PRELOAD
-  // ----------------------------------------------------
+  // =================== PARAMS À FIGER ICI ===================
+  FIXED_LAYOUT = {
+    // >>> Remplace ces valeurs par celles que tu as calées <<<
+    WIN:   { x: 274, y: 125, w: 720, h: 410 }, // fenêtre des rouleaux (px scène)
+    GAP_X: 19,                                  // espace entre colonnes
+    COLS:  5,
+    ROWS:  3
+  };
+
+  // Levier: position relative au bord droit/centre de la fenêtre de reels
+  LEVER = {
+    dx: 60,   // décalage horizontal (vers la gauche si négatif)
+    dy: -64,   // décalage vertical (vers le haut si négatif)
+    padRight: 60,   // marge à droite de la fenêtre
+    anchor: 0.50,   // 0 = haut de la fenêtre, 0.5 = milieu, 1 = bas
+    scale: 0.9
+  };
+
+  // Reels (strip)
+  STRIP_W = 134; SYMBOL_H = 134; SYMBOL_CNT = 10;
+
+  // Helpers
+  _hasAudio(k){ return this.cache?.audio?.exists?.(k); }
+  _add(k,cfg={}){ return this._hasAudio(k) ? this.sound.add(k,cfg) : null; }
+  _play(k,cfg={}){ if(this._hasAudio(k)) this.sound.play(k,cfg); }
+
+
   preload(){
-    // Décor
-    this.load.image('slotBg',    'assets/menu/bg.png');
-    this.load.image('slotFrame', 'assets/slot/Cadre_slot.png');
+    // Visuels
+    this.load.image('slot-bg',    'assets/slot/slot-background.png');
+    this.load.image('frame',      'assets/slot/cadre-slot.png');
+    this.load.image('reel_clear', 'assets/slot/reel_clear.png');
+    this.load.image('reel_blur',  'assets/slot/reel_blur.png');
 
-    // Reels (un strip clair + un strip flou, 134x1340 avec 10 symboles)
-    this.load.image('reel_clear','assets/slot/reel_clear.png');
-    this.load.image('reel_blur', 'assets/slot/reel_blur.png');
 
-    // Bande d’UI avec tous les boutons (image unique)
-    this.load.image('btnSheet',  'assets/slot/ui/buttons-en.png');
+    // digits 0..9 + blank
+    for (let i=0; i<=9; i++) this.load.image(`digit${i}`, `assets/slot/ui/digit${i}.png`);
+    this.load.image('digitblank', 'assets/slot/ui/digitblank.png');
+
+
+    // Levier en spritesheet (5 frames horizontales)
+    this.load.spritesheet('lever', 'assets/slot/ui/lever.png', {
+      frameWidth: 77,   // ajuste si ton spritesheet a d'autres dimensions
+      frameHeight: 351,
+      endFrame: 4
+    });
+
+    // SFX (ignorés s’ils manquent)
+    ['spin_start','spin_loop','stop1','stop2','stop3','stop4','stop5','win_small','win_big','ui_click_down','ui_click_up','payout_rattle']
+      .forEach(k=> this.load.audio(k, `assets/slot/sfx/${k}.ogg`));
   }
 
-  // ----------------------------------------------------
-  // CREATE
-  // ----------------------------------------------------
-  create(){
-    const { width:W, height:H } = this.scale.gameSize;
-    const DEPTH = { bg:0, reels:150, frame:300, ui:320, overlay:330 };
 
-    // --- décor
-    this.cameras.main.setBackgroundColor('#0d1117');
-    this.add.image(W/2, H/2, 'slotBg').setDisplaySize(W, H).setDepth(DEPTH.bg);
+  // État de jeu basique (mise & lignes)
+  lines = 1;
+  bet   = 1;
 
-    // === Réglages visuels rapides ===========================================
-    // Fenêtre des rouleaux (ajuste ces valeurs pour tomber pile dans le cadre)
-    const COLS = 5, ROWS = 3;
-    const REELS_WIDTH   = Math.min(680, W * 0.74);
-    const REELS_HEIGHT  = Math.min(440, H * 0.446);
-    const REELS_OFFSET_X= 0;
-    const REELS_OFFSET_Y= 42.5;
-    const GAP_X         = 15;
 
-    // Cadre (échelle & offset)
-    const FRAME_PAD_X   = 0.80;
-    const FRAME_PAD_Y   = 0.98;
-    const FRAME_OFF_X   = 0;
-    const FRAME_OFF_Y   = 0;
+  /**
+   * Crée un affichage de chiffres monospaces.
+   * cfg = { x, y, digits=4, height=48, spacing=0.88, align:'center', depth=520, pad:'blank'|'zero' }
+   * Retourne un objet avec : setValue(n), animateTo(n,dur=700), setHeight(h), setPosition(x,y), setAlign(a)
+   */
+  _createDigits(cfg={}){
+    const pad    = cfg.pad ?? 'blank';
+    const n      = cfg.digits ?? 4;
+    const height = cfg.height ?? 48;
+    const spacing= cfg.spacing ?? 0.88;
+    const depth  = cfg.depth ?? 520;
+    const align  = cfg.align ?? 'center';
+    const x0     = cfg.x ?? 0, y0 = cfg.y ?? 0;
 
-    // Animation
-    const STAGGER    = 500;   // décalage entre rouleaux (ms)
-    const LIFT_ROWS  = 0.35;  // petit “hop” vers le haut
-    const LIFT_MS    = 140;
-    const SPIN_MS    = 3000;  // phase rapide
-    const STOP_MS    = 1100;  // freinage
-    const BASE_CYCLES= 6;     // tours minimaux par colonne
-    const SPIN_DIR   = -1;    // -1 = descend (classique casino)
-    // ========================================================================
+    // taille native d'un digit (supposés identiques)
+    const baseTex = this.textures.get('digit0').getSourceImage();
+    const baseW = baseTex.width, baseH = baseTex.height;
+    const scale = height / baseH;
+    const dispW = baseW * scale, dispH = height;
 
-    // --- géométrie fenêtre
-    const reelW   = (REELS_WIDTH - (COLS - 1) * GAP_X) / COLS;
-    const reelH   = REELS_HEIGHT;
-    const winLeft = (W - REELS_WIDTH)/2 + REELS_OFFSET_X;
-    const winTop  = (H - REELS_HEIGHT)/2 + REELS_OFFSET_Y;
+    // conteneur
+    const cont = this.add.container(x0, y0).setDepth(depth);
 
-    // --- dimensions réelles du strip (déjà chargé en preload)
-    const src = this.textures.get('reel_clear').getSourceImage();
-    const STRIP_W = src.width;         // 134
-    const STRIP_H = src.height;        // 1340
-    const SYMBOL_CNT = 10;             // 10 symboles dans le strip
-    const SYMBOL_H   = Math.floor(STRIP_H / SYMBOL_CNT); // 134
-
-    // --- création des rouleaux (tileSprite)
-    this.reels = [];
-    for (let i=0; i<COLS; i++){
-      const x = winLeft + i*(reelW + GAP_X) + reelW/2;
-      const y = winTop  + reelH/2;
-
-      const spr = this.add.tileSprite(x, y, reelW, reelH, 'reel_clear')
-        .setDepth(DEPTH.reels);
-
-      // montre exactement 3 symboles visibles
-      spr.tileScaleX = reelW / STRIP_W;
-      spr.tileScaleY = reelH / (ROWS * SYMBOL_H);
-
-      // position texture initiale
-      spr.tilePositionY = Phaser.Math.Between(0, STRIP_H - 1);
-
-      this.reels.push({ sprite: spr });
+    // crée les sprites
+    const sprites=[];
+    for (let i=0;i<n;i++){
+      const spr = this.add.image(0,0,'digitblank').setOrigin(0.5,0.5).setDepth(depth);
+      spr.setDisplaySize(dispW, dispH);
+      sprites.push(spr); cont.add(spr);
     }
 
-    // --- cadre par-dessus
-    const frame = this.add.image(W/2 + FRAME_OFF_X, H/2 + FRAME_OFF_Y, 'slotFrame')
-      .setDepth(DEPTH.frame);
-    frame.setScale((W / frame.width) * FRAME_PAD_X,
-                   (H / frame.height) * FRAME_PAD_Y);
+    // aligne horizontalement
+    const _layout = ()=>{
+      const total = n * dispW + (n-1) * (dispW*(1-spacing));
+      let left = 0;
+      if (align==='center') left = -total/2 + dispW/2;
+      else if (align==='left') left = dispW/2;
+      else if (align==='right') left = -total + dispW/2;
 
-    // --- config d’animation (stockée pour le click SPIN)
-    this.spinCfg = { SYMBOL_H, STRIP_H, SYMBOL_CNT, STAGGER, LIFT_ROWS, LIFT_MS, SPIN_MS, STOP_MS, BASE_CYCLES, SPIN_DIR };
-
-    // --- état de la mise/nb lignes (simple)
-    this.lines = 3;
-    this.bet   = 3;
-
-    // ------------------------------------------------------------------------
-    // BOUTONS : on découpe buttons-en.png en rectangles (UP / PRESSED)
-    // Ajuste ces coordonnées si besoin (utilise le petit helper de debug plus bas)
-    const BTN = {
-      play1: { up:{x:170,y:330,w:170,h:110}, pressed:{x:170,y:585,w:170,h:110} },
-      play3: { up:{x:370,y:330,w:170,h:110}, pressed:{x:370,y:585,w:170,h:110} },
-      play5: { up:{x:570,y:330,w:170,h:110}, pressed:{x:570,y:585,w:170,h:110} },
-      spin:  { up:{x:930,y:315,w:220,h:140}, pressed:{x:930,y:570,w:220,h:140} },
+      const step = dispW * spacing;
+      sprites.forEach((spr,i)=> spr.setPosition(left + i*step, 0));
     };
-    // // Debug visuel pour ajuster les rectangles :
-     Object.values(BTN).forEach(b=>{
-       ['up','pressed'].forEach(k=>{
-         const r=b[k]; const g=this.add.graphics().setDepth(999);
-         g.lineStyle(2,0xff0000,0.6).strokeRect(r.x,r.y,r.w,r.h);
-       });
-     });
+    _layout();
 
-    // Placement façon FreeSlots (3 boutons centrés + un SPIN à droite)
-    const rowY   = winTop + reelH + 90;
-    const gap    = 170;
-    const startX = W/2 - gap; // 3 boutons centrés
-
-    this._makeSheetButton(BTN.play1.up, BTN.play1.pressed, startX - gap, rowY, 0.55, ()=>{
-      this.lines = 1; this.bet = 1;
-    });
-    this._makeSheetButton(BTN.play3.up, BTN.play3.pressed, startX, rowY, 0.55, ()=>{
-      this.lines = 3; this.bet = 3;
-    });
-    this._makeSheetButton(BTN.play5.up, BTN.play5.pressed, startX + gap, rowY, 0.55, ()=>{
-      this.lines = 5; this.bet = 5;
-    });
-
-    const spinX = W/2 + gap*2;
-    this._makeSheetButton(BTN.spin.up, BTN.spin.pressed, spinX, rowY, 0.55, async ()=>{
-      await this._doSpin(this.spinCfg);
-    });
-
-    // Dev: touche D pour basculer reels devant/derrière le cadre
-    this.input.keyboard.on('keydown-D', ()=>{
-      const top = (this.reels[0].sprite.depth > frame.depth);
-      this.reels.forEach(r=> r.sprite.setDepth(top ? DEPTH.frame - 1 : DEPTH.reels));
-    });
-
-    this.spinning = false;
-  }
-
-  // ----------------------------------------------------
-  // HELPER bouton découpé depuis 'btnSheet'
-  // ----------------------------------------------------
-  _makeSheetButton(rectUp, rectDown, x, y, scale = 1, onClick){
-    const base = this.add.image(0, 0, 'btnSheet').setOrigin(0.5);
-    base.setCrop(rectUp.x, rectUp.y, rectUp.w, rectUp.h);
-    base.setDisplaySize(rectUp.w * scale, rectUp.h * scale);
-
-    // zone interactive = rectangle visible
-    base.setInteractive({
-      hitArea: new Phaser.Geom.Rectangle(-base.displayWidth/2, -base.displayHeight/2, base.displayWidth, base.displayHeight),
-      hitAreaCallback: Phaser.Geom.Rectangle.Contains,
-      useHandCursor: true
-    });
-
-    const c = this.add.container(x, y, [base]).setDepth(320);
-
-    base.on('pointerdown', ()=>{
-      base.setCrop(rectDown.x, rectDown.y, rectDown.w, rectDown.h);
-    });
-    base.on('pointerup', ()=>{
-      base.setCrop(rectUp.x, rectUp.y, rectUp.w, rectUp.h);
-      onClick && onClick();
-    });
-    base.on('pointerout', ()=>{
-      base.setCrop(rectUp.x, rectUp.y, rectUp.w, rectUp.h);
-    });
-
-    return c;
-  }
-
-  // ----------------------------------------------------
-  // SPIN principal (lift -> spin flou -> stop net)
-  // ----------------------------------------------------
-  async _doSpin(ctx){
-    if (this.spinning) return;
-    this.spinning = true;
-
-    // 1) Demande résultat au backend (fallback local sinon)
-    let grid;
-    try {
-      const res = await api('api/slot/spin', { method:'POST', body:{ bet:this.bet, lines:this.lines } });
-      // attendu: res.grid = [ [top,mid,bot], ... 5 colonnes ] (indices 0..9)
-      grid = Array.isArray(res.grid) ? res.grid : null;
-      if (typeof res.credits === 'number') this.game.events.emit('credits:update', res.credits);
-    } catch {
-      grid = null;
-    }
-    if (!grid || grid.length < this.reels.length) {
-      grid = Array.from({length:this.reels.length}, ()=> [
-        Phaser.Math.Between(0, ctx.SYMBOL_CNT-1),
-        Phaser.Math.Between(0, ctx.SYMBOL_CNT-1),
-        Phaser.Math.Between(0, ctx.SYMBOL_CNT-1),
-      ]);
-    }
-
-    // 2) Anime chaque rouleau vers l’indice top demandé
-    const promises = this.reels.map((reel, i)=>{
-      const spr = reel.sprite;
-      const targetTopIndex =
-        (Array.isArray(grid[i]) && grid[i].length>=3 && Number.isInteger(grid[i][0]))
-          ? grid[i][0] : Phaser.Math.Between(0, ctx.SYMBOL_CNT-1);
-
-      return new Promise(resolve=>{
-        this.time.delayedCall(i*ctx.STAGGER, ()=>{
-
-          // Snap de départ sur une ligne entière
-          const startRows = Math.round(this._rowsFromPos(spr.tilePositionY, ctx.SYMBOL_H, ctx.STRIP_H));
-          spr.tilePositionY = this._posFromRows(startRows, ctx.SYMBOL_H, ctx.STRIP_H);
-
-          // LIFT -> SPIN -> STOP avec atterrissage exact
-          const rLift = startRows + ctx.SPIN_DIR * ctx.LIFT_ROWS;
-          const rSpin = rLift    + ctx.SPIN_DIR * ((ctx.BASE_CYCLES + i) * ctx.SYMBOL_CNT);
-
-          // distance jusqu’à la cible (respect du sens)
-          const rem = ((rSpin % ctx.SYMBOL_CNT) + ctx.SYMBOL_CNT) % ctx.SYMBOL_CNT;
-          let delta;
-          if (ctx.SPIN_DIR === 1) delta = (targetTopIndex - rem + ctx.SYMBOL_CNT) % ctx.SYMBOL_CNT;
-          else { delta = (rem - targetTopIndex + ctx.SYMBOL_CNT) % ctx.SYMBOL_CNT; delta = -delta; }
-          const rStop = rSpin + delta;
-
-          // LIFT
-          this.tweens.addCounter({
-            from:startRows, to:rLift, duration:ctx.LIFT_MS, ease:'Sine.easeOut',
-            onUpdate:(tw,o)=> spr.tilePositionY = this._posFromRows(o.value, ctx.SYMBOL_H, ctx.STRIP_H),
-            onComplete: ()=>{
-              spr.setTexture('reel_blur'); // flou pendant la phase rapide
-
-              // SPIN rapide
-              this.tweens.addCounter({
-                from:rLift, to:rSpin, duration:ctx.SPIN_MS, ease:'Linear',
-                onUpdate:(tw,o)=> spr.tilePositionY = this._posFromRows(o.value, ctx.SYMBOL_H, ctx.STRIP_H),
-                onComplete: ()=>{
-                  spr.setTexture('reel_clear'); // net AVANT le freinage
-
-                  // STOP doux
-                  this.tweens.addCounter({
-                    from:rSpin, to:rStop, duration:ctx.STOP_MS, ease:'Cubic.easeOut',
-                    onUpdate:(tw,o)=> spr.tilePositionY = this._posFromRows(o.value, ctx.SYMBOL_H, ctx.STRIP_H),
-                    onComplete: resolve
-                  });
-                }
-              });
-            }
-          });
+    // méthodes publiques
+    const api = {
+      container: cont,
+      setHeight: (h)=>{
+        const s = h / baseH;
+        const w = baseW * s;
+        sprites.forEach(spr=> spr.setDisplaySize(w, h));
+        _layout(); return api;
+      },
+      setPosition: (x,y)=>{ cont.setPosition(x,y); return api; },
+      setAlign: (a)=>{ api.align=a; _layout(); return api; },
+      setValue: (val)=>{
+        // supporte number ou string; valeurs négatives affichées sans signe
+        const sVal = String(Math.max(0, parseInt(val||0,10)));
+        const chars = sVal.split('');
+        const start = Math.max(0, n - chars.length);
+        for (let i=0;i<n;i++){
+          if (i < start){
+            sprites[i].setTexture(pad==='zero' ? 'digit0' : 'digitblank');
+          }else{
+            const d = chars[i - start];
+            sprites[i].setTexture(`digit${d}`);
+          }
+        }
+        return api;
+      },
+      animateTo: (target, dur=700)=>{
+        const obj={ v: 0 };
+        // part de la valeur affichée actuelle (reconstruite)
+        let cur='';
+        for (const spr of sprites){
+          const key = spr.texture?.key || 'digitblank';
+          cur += (key.startsWith('digit') && key!=='digitblank') ? key.replace('digit','') : '';
+        }
+        obj.v = parseInt(cur||'0',10);
+        this.tweens.add({
+          targets: obj, v: target, duration: dur, ease: 'Cubic.Out',
+          onUpdate: ()=> api.setValue(Math.floor(obj.v))
         });
-      });
+        return api;
+      }
+    };
+    return api.setHeight(height); // applique height + layout
+  }
+
+
+
+
+  create(){
+    const W=this.scale.width, H=this.scale.height;
+    this.add.image(W/2, H/2, 'slot-bg').setDisplaySize(W, H);
+
+    // ===== Fenêtre FIXE des rouleaux =====
+    const { WIN, GAP_X, COLS, ROWS } = this.FIXED_LAYOUT;
+    this.win = { ...WIN };
+    this.reelGapX = GAP_X;
+    this.COLS = COLS; this.ROWS = ROWS;
+
+    // ===== Crée les reels =====
+    this._createReels();
+
+    // ===== Cadre au-dessus (trou transparent) =====
+    this.add.image(W/2, H/2, 'frame')
+      .setDepth(500)
+      .setDisplaySize(W*0.86, H*0.92);
+
+    // ===== Levier animé (repositionné à gauche/haut via dx/dy) =====
+    this.anims.create({ key:'lever_pull',
+      frames:this.anims.generateFrameNumbers('lever',{start:0,end:4}),
+      frameRate:24, yoyo:true
     });
+    const leverX = this.win.x + this.win.w + this.LEVER.padRight + this.LEVER.dx;
+    const leverY = this.win.y + this.win.h * this.LEVER.anchor + this.LEVER.dy;
 
-    await Promise.all(promises);
-    this.spinning = false;
+    const lever = this.add.sprite(leverX, leverY, 'lever', 0)
+      .setScale(this.LEVER.scale)
+      .setDepth(600)
+      .setInteractive({ useHandCursor:true });
+
+    lever.on('pointerdown', ()=>{ if(!this.isSpinning){ this._play('ui_click_down',{volume:0.5}); lever.play('lever_pull'); }});
+    lever.on('pointerup',   ()=> this._play('ui_click_up',{volume:0.5}));
+    lever.on('animationcomplete', a=>{ if(a.key==='lever_pull') this._doSpin(); });
+
+    // HUD
+    this.statusText = this.add.text(14,14,'Ready',{fontFamily:'system-ui,Arial',fontSize:'16px',color:'#fff'}).setDepth(999);
+
+    // --- DIGITS (simple) — édite SEULEMENT ces nombres :
+    const DIGITS_Y  = this.win.y + this.win.h + 82; // Y commun
+    const DIGIT_H   = 58;    // hauteur des chiffres
+    const DIGIT_SP  = 0.95;  // espacement entre chiffres (0.80 serré → 0.95 aéré)
+
+    const X_GAINS   = this.win.x + 115; // centre "Gains"
+    const X_CREDITS = this.win.x + 470; // centre "Crédits"
+    const X_MISE    = this.win.x + 675; // centre "Mise"
+
+    // crée/replace les tableaux
+    this.winDigits     = this._createDigits({ x:X_GAINS,   y:DIGITS_Y, digits:4, height:DIGIT_H, spacing:DIGIT_SP, align:'center' });
+    this.creditsDigits = this._createDigits({ x:X_CREDITS, y:DIGITS_Y, digits:6, height:DIGIT_H, spacing:DIGIT_SP, align:'center' });
+    this.betDigits     = this._createDigits({ x:X_MISE,    y:DIGITS_Y, digits:3, height:DIGIT_H, spacing:DIGIT_SP, align:'center' });
+
+
+
+    // valeurs initiales
+    this.bet = this.bet ?? 1;
+    this.lines = this.lines ?? 1;
+
+    this.winDigits.setValue(0);
+    const u0 = this.registry.get('user') || {};
+    this.creditsDigits.setValue(Number.isFinite(u0.credits)? u0.credits : 0);
+    this.betDigits.setValue(this.bet);
+
+    // maj auto crédits si l'app émet 'credits:update'
+    this.game.events.on('credits:update', c=> this.creditsDigits.setValue(c));
+
+
+    // Spin config
+    this.cfg={ STAGGER:500, LIFT_ROWS:0.35, LIFT_MS:140, SPIN_MS:3000, STOP_MS:1100, BASE_CYCLES:6, DIR:-1 };
+    this.isSpinning=false; this._spinLoop=null;
+    this._stopKeys=['stop1','stop2','stop3','stop4','stop5'].filter(k=> this.cache.audio.exists(k));
+
+    // Dev helper (facultatif) : pour récupérer les valeurs actuelles depuis la console
+    window.slot = this; // dans la console:  copy(JSON.stringify({ WIN: slot.win, GAP_X: slot.reelGapX }))
   }
 
-  // ----------------------------------------------------
-  // Utilitaires positions <-> lignes
-  // ----------------------------------------------------
-  _rowsFromPos(tilePosY, SYMBOL_H, STRIP_H){
-    const r = (tilePosY % STRIP_H + STRIP_H) % STRIP_H;
-    return r / SYMBOL_H;
+  // ---------- Création des rouleaux à partir du layout fixe ----------
+  _createReels(){
+    const {x,y,w,h} = this.win;
+    const reelW = (w - (this.COLS-1)*this.reelGapX) / this.COLS;
+    const reelH = h;
+
+    this.reels = [];
+    for(let i=0;i<this.COLS;i++){
+      const cx = x + i*(reelW + this.reelGapX) + reelW/2;
+      const cy = y + reelH/2;
+      const t  = this.add.tileSprite(cx, cy, reelW, reelH, 'reel_clear')
+        .setOrigin(0.5).setDepth(400);
+      t.tileScaleX = reelW / this.STRIP_W;
+      t.tileScaleY = reelH / (this.ROWS*this.SYMBOL_H);
+      const r0 = Phaser.Math.Between(0, this.SYMBOL_CNT-1);
+      t.tilePositionY = -r0 * this.SYMBOL_H;
+      this.reels.push(t);
+    }
   }
-  _posFromRows(rows, SYMBOL_H, STRIP_H){
-    const px = rows * SYMBOL_H;
-    return ((px % STRIP_H) + STRIP_H) % STRIP_H;
+
+  // =================== SPIN (timeline robuste) ===================
+  async _doSpin(){
+    if(this.isSpinning) return;
+    this.isSpinning = true;
+    this.statusText.setText('Spinning…');
+
+    // Audio (tolérant si tu as les helpers _add/_play)
+    this._play && this._play('spin_start',{volume:0.7});
+    this._spinLoop = this._add ? this._add('spin_loop',{loop:true,volume:0.35})
+                               : this.sound.add('spin_loop',{loop:true,volume:0.35});
+    if(this._spinLoop) this._spinLoop.play();
+
+    // Cible API -> fallback local
+    let targetTops=[];
+    try{
+      const res = await api('api/slot/spin',{method:'POST',body:{bet:1,lines:1}});
+      if(res?.grid?.length===this.COLS) targetTops = res.grid.map(col => col[0] ?? Phaser.Math.Between(0,this.SYMBOL_CNT-1));
+      this._pendingPayout = Number.isFinite(res?.payout) ? res.payout : null;
+      this._pendingCredits= Number.isFinite(res?.credits)? res.credits : null;
+    }catch(e){}
+    if(targetTops.length!==this.COLS){
+      targetTops = Array.from({length:this.COLS}, ()=> Phaser.Math.Between(0,this.SYMBOL_CNT-1));
+      this._pendingPayout = this._pendingCredits = null;
+    }
+
+    const N=this.SYMBOL_CNT, DIR=this.cfg.DIR;
+    const LIFT=this.cfg.LIFT_ROWS, CYC=this.cfg.BASE_CYCLES;
+    const LIFT_MS=this.cfg.LIFT_MS, SPIN_MS=this.cfg.SPIN_MS, STOP_MS=this.cfg.STOP_MS, STAG=this.cfg.STAGGER;
+
+    // Fin robuste + failsafe
+    let finished=false, doneCols=0;
+    const finalize=()=>{
+      if(finished) return; finished=true;
+      if(this._spinLoop) this._spinLoop.stop();
+      this._onSpinEnd(targetTops);
+    };
+    const budget = LIFT_MS + SPIN_MS + STOP_MS + (this.reels.length-1)*STAG + 800;
+    this.time.delayedCall(budget, finalize);
+
+    // Chaîne de 3 tweens par colonne (un seul tileSprite)
+    this.reels.forEach((tile, i)=>{
+      const start = Math.round(-tile.tilePositionY / this.SYMBOL_H); // ENTIER
+      const rLift = start + DIR*LIFT;
+      const rSpin = rLift + DIR*((CYC+i)*N - LIFT);                  // ENTIER
+      const at = ((rSpin % N) + N) % N;
+      const tt = ((targetTops[i] % N) + N) % N;
+      const steps = (DIR===-1) ? ((at - tt + N) % N) : ((tt - at + N) % N);
+      const rStop = rSpin + DIR*steps;                               // ENTIER -> ENTIER
+
+      const counter = { r:start };
+
+      const stage3 = ()=>{
+        this.tweens.add({
+          targets: counter, r: rStop, duration: STOP_MS, ease: 'Cubic.Out',
+          onStart: ()=> tile.setTexture('reel_clear'),
+          onUpdate: ()=> { tile.tilePositionY = -counter.r * this.SYMBOL_H; },
+          onComplete: ()=>{
+            tile.tilePositionY = -rStop * this.SYMBOL_H;
+            if(this._stopKeys?.length){
+              const k = this._stopKeys[i % this._stopKeys.length];
+              this._play ? this._play(k,{volume:0.6}) : this.sound.play(k,{volume:0.6});
+            }
+            if(++doneCols === this.reels.length) finalize();
+          }
+        });
+      };
+
+      const stage2 = ()=>{
+        this.tweens.add({
+          targets: counter, r: rSpin, duration: SPIN_MS, ease: 'Linear',
+          onStart: ()=> tile.setTexture('reel_blur'),
+          onUpdate: ()=> { tile.tilePositionY = -counter.r * this.SYMBOL_H; },
+          onComplete: stage3
+        });
+      };
+
+      const stage1 = ()=>{
+        this.tweens.add({
+          targets: counter, r: rLift, duration: LIFT_MS, ease: 'Sine.Out',
+          onUpdate: ()=> { tile.tilePositionY = -counter.r * this.SYMBOL_H; },
+          onComplete: stage2
+        });
+      };
+
+      this.time.delayedCall(i*STAG, stage1);
+    });
   }
+
+
+
+
+  _onSpinEnd(targetTops){
+    const hasPayout   = Number.isFinite(this._pendingPayout);
+    const hasCredits  = Number.isFinite(this._pendingCredits);
+    const p           = hasPayout ? this._pendingPayout : 0;
+
+    // SFX gains
+    if (hasPayout){
+      if (p >= 100) this._play('win_big',{volume:0.9});
+      else if (p > 0) this._play('win_small',{volume:0.8});
+      this._play('payout_rattle',{volume:0.5});
+    }
+
+    // DIGITS: Gains
+    if (this.winDigits){
+      if (p > 0) this.winDigits.animateTo(p, 800);
+      else       this.winDigits.setValue(0);
+    }
+
+    // DIGITS: Crédits
+    if (hasCredits){
+      // si l'API fournit les crédits → on pousse l'event standard
+      this.game.events.emit('credits:update', this._pendingCredits);
+    } else if (hasPayout && p > 0){
+      // fallback: incrémente localement les crédits affichés
+      const u   = this.registry.get('user') || {};
+      const cur = Number.isFinite(u.credits) ? u.credits : 0;
+      const next = cur + p;
+      this.registry.set('user', { ...u, credits: next });
+      this.game.events.emit('credits:update', next);
+    }
+
+    this.statusText.setText(`Top: ${targetTops.join(' ')}`);
+    this.isSpinning = false;
+    this._pendingPayout = null;
+    this._pendingCredits = null;
+  }
+
+
+  // ---------- Helpers ----------
+  _rowsFrom(tile){ return -tile.tilePositionY / this.SYMBOL_H; }
+  _setRows(tile,r){ tile.tilePositionY = -r * this.SYMBOL_H; }
+  _mod(a,b){ return ((a%b)+b)%b; }
+  _play(key,cfg={}){ if(this.cache.audio.exists(key)) this.sound.play(key,cfg); }
 }
