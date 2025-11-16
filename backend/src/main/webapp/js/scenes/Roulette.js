@@ -172,7 +172,7 @@ export class Roulette extends Phaser.Scene {
         // On lance le nettoyage des mises (asynchrone, mais on ne l’attend pas ici)
         this._clearBets().catch(()=>{});
       });
-      if (clearBtn) clearBtn.setScale(0.3).setDepth(60);
+      if (clearBtn) clearBtn.setScale(0.55).setDepth(60);
 
       // Jeton vert sous le 36 (miser plus)
       const big_chip = this._imageBtn(c36.cx, yBelow, 'GreenChipsBtn', () => {
@@ -188,29 +188,55 @@ export class Roulette extends Phaser.Scene {
     this.time.delayedCall(0, placeBetButtons);
 
     // --- Boutons RED / BLACK / EVEN / ODD / 1-18 / 19-36 sur le côté du tapis ---
+
     const quicks = [
-      { label: '1-18',  type: 'LOW'  },
-      { label: 'EVEN',  type: 'EVEN' },
-      { label: 'RED',   type: 'RED'  },
-      { label: 'BLACK', type: 'BLACK'},
-      { label: 'ODD',   type: 'ODD'  },
-      { label: '19-36', type: 'HIGH' }
+      { label: '1-18',  type: 'LOW',   colorBg: 0x14253a },
+      { label: 'EVEN',  type: 'EVEN',  colorBg: 0x14253a },
+      { label: 'RED',   type: 'RED',   colorBg: 0xb00000 }, // ROUGE
+      { label: 'BLACK', type: 'BLACK', colorBg: 0x000000 }, // NOIR
+      { label: 'ODD',   type: 'ODD',   colorBg: 0x14253a },
+      { label: '19-36', type: 'HIGH',  colorBg: 0x14253a }
     ];
 
-    // Dimensions de la grille pour placer les boutons à côté
-    const gridHeight = 12 * cellH + 11 * gap;
-    const sideX = tableLeft + cellW + gap + tableWidth + 48; // à droite de la grille des 1–36
-    const baseY = top + cellH / 2;
-    const stepY = gridHeight / (quicks.length - 1);
+    // Décalage horizontal à droite de la grille
+    const offsetX = 109;
+
+    // Hauteur du bouton
+    const btnH = 91;
+
+    // Écart vertical entre les boutons
+    const spacing = 0;
+
+    // Position de départ
+    const startX = tableLeft + tableWidth + offsetX;
+    const startY = top + 46;
 
     quicks.forEach((q, i) => {
-      const y = baseY + i * stepY;
-      this._btn(sideX, y, q.label, async () => {
-        try{
-          await this._addBet({ type:q.type, amount:this.betUnit });
-          this._toast(`Mise ${q.label} +${this.betUnit}`);
-        }catch{}
-      }, 90);
+      const y = startY + i * (btnH + spacing);
+
+      // Création manuelle d’un bouton custom plus haut & coloré
+      const btn = this.add.container(startX, y);
+
+      const bg = this.add.rectangle(0, 0, 90, btnH, q.colorBg)
+        .setStrokeStyle(1, 0x6fb1ff)
+        .setInteractive({ useHandCursor: true })
+        .setOrigin(0.5);
+
+      const tx = this.add.text(0, 0, q.label, {
+        fontFamily: 'monospace',
+        fontSize: 16,
+        color: '#eaffff'
+      }).setOrigin(0.5);
+
+      bg.on('pointerdown', () => bg.setScale(0.97));
+      bg.on('pointerup', () => {
+        bg.setScale(1);
+        this._addBet({ type: q.type, amount: this.betUnit })
+          .then(() => this._toast(`Mise ${q.label} +${this.betUnit}`))
+          .catch(() => {});
+      });
+
+      btn.add([bg, tx]);
     });
 
     // Boutons pour les douzaines et les colonnes (mises de type DOZEN / COLUMN)
