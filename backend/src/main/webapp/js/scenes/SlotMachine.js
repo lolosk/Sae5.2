@@ -25,15 +25,138 @@ export class SlotMachine extends Phaser.Scene {
   // Reels (strip)
   STRIP_W = 134; SYMBOL_H = 134; SYMBOL_CNT = 10;
 
-  // Helpers
+  // Payout par LIGNE pour une mise unitaire (stake=1)
+  PAYTABLE = { 3: 10, 4: 50, 5: 500 };
+
+  // Mise par ligne (stake) → totalBet = lines * stake
+  stake = 1;   // 1 crédit / ligne
+
+
+
+  // HELPERS
   _hasAudio(k){ return this.cache?.audio?.exists?.(k); }
   _add(k,cfg={}){ return this._hasAudio(k) ? this.sound.add(k,cfg) : null; }
   _play(k,cfg={}){ if(this._hasAudio(k)) this.sound.play(k,cfg); }
 
+  // ----- Crédits -----
+  _getCredits(){
+    const u = this.registry.get('user') || {};
+    return Number.isFinite(u.credits) ? u.credits : 0;
+  }
+  _setCredits(next){
+    const u = this.registry.get('user') || {};
+    const val = Math.max(0, Math.floor(next));
+    this.registry.set('user', { ...u, credits: val });
+    this.game.events.emit('credits:update', val);
+  }
+  _debitBet(){
+    const cost = Math.max(0, (this.stake|0) * (this.lines|0)); // total = stake/ligne × nb lignes
+    if (cost > 0){
+      const cur  = this._getCredits();
+      const next = Math.max(0, cur - cost);
+      if (this.creditsDigits) this.creditsDigits.animateTo(next, 250);
+      this._setCredits(next);
+      // Mets aussi à jour la valeur affichée de mise totale si tu changes stake/lines ailleurs
+      if (this.betDigits) this.betDigits.setValue(cost);
+    }
+  }
+
+  _animateCreditGain(amount){
+    if (!amount || amount <= 0) return;
+
+    const start  = this._getCredits();
+    const target = start + Math.floor(amount);
+    const haveTick = this._hasAudio && (this._hasAudio('coin_tick') || this._hasAudio('win_small'));
+
+    // Limite à ~250 ticks max pour ne pas traîner trop longtemps
+    const maxTicks = 250;
+    const step = Math.max(1, Math.ceil(amount / maxTicks));
+    const intervalMs = 16; // ~60 fps
+
+    let cur = start;
+    const tickOnce = ()=>{
+      if (cur >= target){
+        this._setCredits(target);
+        return;
+      }
+      cur = Math.min(target, cur + step);
+      if (this.creditsDigits) this.creditsDigits.setValue(cur);
+      if (haveTick){
+        const k = this._hasAudio('coin_tick') ? 'coin_tick' : 'win_small';
+        this._play(k, { volume: 0.35 });
+      }
+      this.time.delayedCall(intervalMs, tickOnce);
+    };
+
+    // petit déclencheur de “rattle” si dispo
+    this._play && this._play('payout_rattle',{volume:0.5});
+    tickOnce();
+  }
+
+
+  // ----- Outils de grille / lignes actives -----
+  _gridFromTops(tops){
+    const N = this.SYMBOL_CNT;
+    const rows = [[],[],[]];                 // 3 rangées visibles (top/mid/bot)
+    for (let c=0; c<this.COLS; c++){
+      const t = ((tops[c] % N)+N)%N;
+      rows[0].push(t);
+      rows[1].push((t+1)%N);
+      rows[2].push((t+2)%N);
+    }
+    return rows; // rows[r][c]
+  }
+  _activeRows(){
+    // 1 ligne => milieu, 3 lignes => les 3 horizontales
+    if (this.lines >= 3) return [0,1,2];
+    return [1];
+  }
+
+  // ----- Évaluation des gains (joker=0, runs contigus n'importe où) -----
+  _evaluatePayout(tops, stake=this.stake, lines=this.lines){
+    const rows = this._gridFromTops(tops);
+    const act  = (lines >= 3) ? [0,1,2] : [1];   // 3 lignes ou juste la du milieu
+    let total = 0;
+
+    const longestRunWithWild = (arr)=>{
+      let best = 0;
+      for (let s=0; s<=this.COLS-3; s++){
+        let match = null, len = 0, hasReal = false;
+        for (let c=s; c<this.COLS; c++){
+          const sym = arr[c];
+          if (sym === 0){            // diamond = joker
+            len++;
+          } else if (match === null || sym === match){
+            match = sym; len++; hasReal = true;
+          } else {
+            break;
+          }
+        }
+        if (hasReal) best = Math.max(best, len);
+      }
+      return best;
+    };
+
+    for (const r of act){
+      const len = longestRunWithWild(rows[r]); // 0..5
+      if (len >= 3){
+        const mult = this.PAYTABLE[len] || 0;  // 10 / 50 / 500
+        total += mult * Math.max(1, stake|0);  // échelle par mise/ligne
+      }
+    }
+    return total;
+  }
+
+
+
+  //END HELPERS
+
+
 
   preload(){
     // Visuels
-    this.load.image('slot-bg',    'assets/slot/slot-background.png');
+    //this.load.image('slot-bg',    'assets/slot/slot-background.png');
+    this.load.video('slot-bg', 'assets/slot/bg.mp4', 'loadeddata', false, true);
     this.load.image('frame',      'assets/slot/cadre-slot.png');
     this.load.image('reel_clear', 'assets/slot/reel_clear.png');
     this.load.image('reel_blur',  'assets/slot/reel_blur.png');
@@ -158,6 +281,30 @@ export class SlotMachine extends Phaser.Scene {
     const W=this.scale.width, H=this.scale.height;
     this.add.image(W/2, H/2, 'slot-bg').setDisplaySize(W, H);
 
+    //Backgroung animé
+    const bgVideo = this.add.video(this.scale.width/2, this.scale.height/2, 'slot-bg')
+      .setOrigin(0.5)
+      .setDepth(0)     // mettre plus bas si besoin, ex: -10
+      .setMute(true)
+      .setLoop(true);
+
+    // helper: couvre tout l’écran en gardant le ratio
+    const fitVideoCover_bg = () => {
+      const W_bg  = this.scale.width;
+      const H_bg  = this.scale.height;
+      const vw_bg = bgVideo.video?.videoWidth  || bgVideo.width  || 1;
+      const vh_bg = bgVideo.video?.videoHeight || bgVideo.height || 1;
+      const s_bg  = Math.max(W_bg / vw_bg, H_bg / vh_bg); // COVER (remplir)
+      bgVideo.setDisplaySize(vw_bg * s_bg, vh_bg * s_bg);
+      bgVideo.setPosition(W_bg / 2, H_bg / 2);
+    };
+
+    // ajuste quand la vidéo démarre + maintenant + sur resize
+    bgVideo.once('play', fitVideoCover_bg);
+    bgVideo.play(true);
+    fitVideoCover_bg();
+    this.scale.on('resize', fitVideoCover_bg, this);
+
     // ===== Fenêtre FIXE des rouleaux =====
     const { WIN, GAP_X, COLS, ROWS } = this.FIXED_LAYOUT;
     this.win = { ...WIN };
@@ -209,8 +356,10 @@ export class SlotMachine extends Phaser.Scene {
 
 
     // valeurs initiales
-    this.bet = this.bet ?? 1;
-    this.lines = this.lines ?? 1;
+    this.lines = 3;         // 3 lignes horizontales actives
+    this.bet   = this.bet ?? 3;
+    if (this.betDigits) this.betDigits.setValue(this.bet);
+
 
     this.winDigits.setValue(0);
     const u0 = this.registry.get('user') || {};
@@ -225,6 +374,17 @@ export class SlotMachine extends Phaser.Scene {
     this.cfg={ STAGGER:500, LIFT_ROWS:0.35, LIFT_MS:140, SPIN_MS:3000, STOP_MS:1100, BASE_CYCLES:6, DIR:-1 };
     this.isSpinning=false; this._spinLoop=null;
     this._stopKeys=['stop1','stop2','stop3','stop4','stop5'].filter(k=> this.cache.audio.exists(k));
+
+    // --- Mise & lignes ---
+    this.lines = 3;           // 3 lignes actives (horizontales)
+    this.stake = 1;           // 1 crédit par ligne
+    this.bet   = this.lines * this.stake; // mise totale du spin (affichée)
+
+    // si tes digits existent déjà :
+    if (this.betDigits)     this.betDigits.setValue(this.bet);
+    if (this.creditsDigits) this.creditsDigits.setValue(this._getCredits ? this._getCredits() : 0);
+    if (this.winDigits)     this.winDigits.setValue(0);
+
 
     // Dev helper (facultatif) : pour récupérer les valeurs actuelles depuis la console
     window.slot = this; // dans la console:  copy(JSON.stringify({ WIN: slot.win, GAP_X: slot.reelGapX }))
@@ -256,6 +416,12 @@ export class SlotMachine extends Phaser.Scene {
     this.isSpinning = true;
     this.statusText.setText('Spinning…');
 
+    // Débit local de la mise (avant l'API)
+    this._debitBet();
+    const res = await api('api/slot/spin', { method:'POST', body:{ bet:this.bet, lines:this.lines } });
+
+
+
     // Audio (tolérant si tu as les helpers _add/_play)
     this._play && this._play('spin_start',{volume:0.7});
     this._spinLoop = this._add ? this._add('spin_loop',{loop:true,volume:0.35})
@@ -265,7 +431,8 @@ export class SlotMachine extends Phaser.Scene {
     // Cible API -> fallback local
     let targetTops=[];
     try{
-      const res = await api('api/slot/spin',{method:'POST',body:{bet:1,lines:1}});
+      const res = await api('api/slot/spin',{ method:'POST', body:{ bet:this.bet, lines:this.lines } });
+
       if(res?.grid?.length===this.COLS) targetTops = res.grid.map(col => col[0] ?? Phaser.Math.Between(0,this.SYMBOL_CNT-1));
       this._pendingPayout = Number.isFinite(res?.payout) ? res.payout : null;
       this._pendingCredits= Number.isFinite(res?.credits)? res.credits : null;
@@ -342,41 +509,38 @@ export class SlotMachine extends Phaser.Scene {
 
 
   _onSpinEnd(targetTops){
-    const hasPayout   = Number.isFinite(this._pendingPayout);
-    const hasCredits  = Number.isFinite(this._pendingCredits);
-    const p           = hasPayout ? this._pendingPayout : 0;
-
-    // SFX gains
-    if (hasPayout){
-      if (p >= 100) this._play('win_big',{volume:0.9});
-      else if (p > 0) this._play('win_small',{volume:0.8});
-      this._play('payout_rattle',{volume:0.5});
+    // 1) Déterminer le payout : API > sinon calcul local
+    let p = Number.isFinite(this._pendingPayout) ? this._pendingPayout : null;
+    if (!Number.isFinite(p)) {
+      p = this._evaluatePayout(targetTops, this.stake, this.lines); // ← stake par ligne
     }
 
-    // DIGITS: Gains
+
+    // 2) SFX + digits WIN
+    if (p >= 100) this._play('win_big',{volume:0.9});
+    else if (p > 0) this._play('win_small',{volume:0.8});
+
     if (this.winDigits){
       if (p > 0) this.winDigits.animateTo(p, 800);
       else       this.winDigits.setValue(0);
     }
 
-    // DIGITS: Crédits
-    if (hasCredits){
-      // si l'API fournit les crédits → on pousse l'event standard
-      this.game.events.emit('credits:update', this._pendingCredits);
-    } else if (hasPayout && p > 0){
-      // fallback: incrémente localement les crédits affichés
-      const u   = this.registry.get('user') || {};
-      const cur = Number.isFinite(u.credits) ? u.credits : 0;
-      const next = cur + p;
-      this.registry.set('user', { ...u, credits: next });
-      this.game.events.emit('credits:update', next);
+    // 3) Crédits finaux
+    if (Number.isFinite(this._pendingCredits)){
+      // l'API renvoie les crédits → on se cale dessus
+      this._setCredits(this._pendingCredits);
+    } else if (p > 0){
+      // sinon on crédite localement avec animation
+      this._animateCreditGain(p);
     }
 
+    // 4) Fin
     this.statusText.setText(`Top: ${targetTops.join(' ')}`);
     this.isSpinning = false;
     this._pendingPayout = null;
     this._pendingCredits = null;
   }
+
 
 
   // ---------- Helpers ----------
