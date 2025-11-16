@@ -38,6 +38,15 @@ export class SlotMachine extends Phaser.Scene {
   _add(k,cfg={}){ return this._hasAudio(k) ? this.sound.add(k,cfg) : null; }
   _play(k,cfg={}){ if(this._hasAudio(k)) this.sound.play(k,cfg); }
 
+  // overlay
+  _prepSpin(){
+    if (this.isSpinning) return;
+    this._clearHighlights();               // <-- enlève l’overlay tout de suite
+    this._play('ui_click_down',{volume:0.5});
+    this.lever?.play('lever_pull');        // déclenche l’anim, qui appellera _doSpin() en complete
+  }
+
+
   // ----- Crédits -----
   _getCredits(){
     const u = this.registry.get('user') || {};
@@ -97,17 +106,24 @@ export class SlotMachine extends Phaser.Scene {
 
 
   // ----- Outils de grille / lignes actives -----
+  // novelle méthode
+  // NOTE: orientation du strip
+  // Si le strip défile vers le haut ou que l'ordre des symboles est inversé,
+  // la rangée du milieu et du bas sont (top-1) et (top-2).
+  // Si un jour tu inverses les strips, remets (top+1)/(top+2).
+
   _gridFromTops(tops){
     const N = this.SYMBOL_CNT;
-    const rows = [[],[],[]];                 // 3 rangées visibles (top/mid/bot)
+    const rows = [[],[],[]];
     for (let c=0; c<this.COLS; c++){
       const t = ((tops[c] % N)+N)%N;
       rows[0].push(t);
-      rows[1].push((t+1)%N);
-      rows[2].push((t+2)%N);
+      rows[1].push((t-1+N)%N);   // <-- sens inversé
+      rows[2].push((t-2+N)%N);   // <-- sens inversé
     }
-    return rows; // rows[r][c]
+    return rows;
   }
+
   _activeRows(){
     // 1 ligne => milieu, 3 lignes => les 3 horizontales
     if (this.lines >= 3) return [0,1,2];
@@ -160,6 +176,20 @@ export class SlotMachine extends Phaser.Scene {
     }
     return hits;
   }
+
+
+  // ---- Lecture fiable des tops affichés ----
+  _topIndex(tile){
+    const N = this.SYMBOL_CNT;
+    const r = Math.round(this._rowsFrom(tile));   // snap à l'entier
+    return ((r % N) + N) % N;                     // modulo positif
+  }
+
+  _readTopIndices(){
+    // renvoie un array [topCol0, topCol1, ...] LUS à l’écran
+    return this.reels.map(t => this._topIndex(t));
+  }
+
 
 
   async _refreshCredits(){
@@ -228,7 +258,15 @@ export class SlotMachine extends Phaser.Scene {
 
 
   _hl = [];
-  _clearHighlights(){ if(this._hl){ this._hl.forEach(o=>o.destroy()); this._hl.length=0; } }
+  _clearHighlights(){
+    if (!this._hl || !this._hl.length) return;
+    this._hl.forEach(o=>{
+      this.tweens.killTweensOf(o); // stoppe le pulse
+      o.destroy();
+    });
+    this._hl.length = 0;
+  }
+
   _showHighlights(hits){
     if(!hits?.length) return;
     const { x, y, w, h } = this.win;
@@ -383,22 +421,39 @@ export class SlotMachine extends Phaser.Scene {
       .setDepth(500)
       .setDisplaySize(W*0.86, H*0.92);
 
-    // ===== Levier animé (repositionné à gauche/haut via dx/dy) =====
-    this.anims.create({ key:'lever_pull',
+    // ===== Levier animé (unique) =====
+    this.anims.create({
+      key:'lever_pull',
       frames:this.anims.generateFrameNumbers('lever',{start:0,end:4}),
       frameRate:24, yoyo:true
     });
+
     const leverX = this.win.x + this.win.w + this.LEVER.padRight + this.LEVER.dx;
     const leverY = this.win.y + this.win.h * this.LEVER.anchor + this.LEVER.dy;
 
-    const lever = this.add.sprite(leverX, leverY, 'lever', 0)
+    // (sécurité) si un levier existait déjà après un wake/restart, on le détruit
+    if (this.lever && !this.lever.destroyed) this.lever.destroy();
+
+    this.lever = this.add.sprite(leverX, leverY, 'lever', 0)
       .setScale(this.LEVER.scale)
       .setDepth(600)
       .setInteractive({ useHandCursor:true });
 
-    lever.on('pointerdown', ()=>{ if(!this.isSpinning){ this._play('ui_click_down',{volume:0.5}); lever.play('lever_pull'); }});
-    lever.on('pointerup',   ()=> this._play('ui_click_up',{volume:0.5}));
-    lever.on('animationcomplete', a=>{ if(a.key==='lever_pull') this._doSpin(); });
+    this.lever.on('pointerdown', ()=> this._prepSpin());
+    this.lever.on('pointerup',   ()=> this._play('ui_click_up',{volume:0.5}));
+    this.lever.on('animationcomplete', a=>{ if(a.key==='lever_pull') this._doSpin(); });
+
+    // ===== Clavier: barre d’espace =====
+    this.input.keyboard.addCapture([Phaser.Input.Keyboard.KeyCodes.SPACE]);
+    // évite d’empiler des listeners si la scène est recréée
+    this.input.keyboard.off('keydown-SPACE', this._prepSpin, this);
+    this.input.keyboard.on('keydown-SPACE', ()=> this._prepSpin(), this);
+
+    // nettoie le listener si la scène est détruite
+    this.events.once('shutdown', ()=>{
+      this.input.keyboard.off('keydown-SPACE', this._prepSpin, this);
+    });
+
 
     // HUD
     this.statusText = this.add.text(14,14,'Ready',{fontFamily:'system-ui,Arial',fontSize:'16px',color:'#fff'}).setDepth(999);
@@ -486,6 +541,7 @@ export class SlotMachine extends Phaser.Scene {
 
     if(this.isSpinning) return;
     this.isSpinning = true;
+    this._clearHighlights();
     this.statusText.setText('Spinning…');
 
     // Débit local de la mise (avant l'API)
@@ -513,10 +569,15 @@ export class SlotMachine extends Phaser.Scene {
     // Fin robuste + failsafe
     let finished=false, doneCols=0;
     const finalize=()=>{
-      if(finished) return; finished=true;
-      if(this._spinLoop) this._spinLoop.stop();
-      this._onSpinEnd(targetTops);
+      if (finished) return;
+      finished = true;
+      if (this._spinLoop) this._spinLoop.stop();
+
+      // ⬇️ LIRE ce qui est vraiment affiché
+      const shownTops = this._readTopIndices();
+      this._onSpinEnd(shownTops);
     };
+
     const budget = LIFT_MS + SPIN_MS + STOP_MS + (this.reels.length-1)*STAG + 800;
     this.time.delayedCall(budget, finalize);
 
@@ -538,7 +599,8 @@ export class SlotMachine extends Phaser.Scene {
           onStart: ()=> tile.setTexture('reel_clear'),
           onUpdate: ()=> { tile.tilePositionY = -counter.r * this.SYMBOL_H; },
           onComplete: ()=>{
-            tile.tilePositionY = -rStop * this.SYMBOL_H;
+            const rStopInt = Math.round(rStop);
+            tile.tilePositionY = -rStopInt * this.SYMBOL_H;  // verrouille pile
             if(this._stopKeys?.length){
               const k = this._stopKeys[i % this._stopKeys.length];
               this._play ? this._play(k,{volume:0.6}) : this.sound.play(k,{volume:0.6});
@@ -625,5 +687,5 @@ export class SlotMachine extends Phaser.Scene {
   _rowsFrom(tile){ return -tile.tilePositionY / this.SYMBOL_H; }
   _setRows(tile,r){ tile.tilePositionY = -r * this.SYMBOL_H; }
   _mod(a,b){ return ((a%b)+b)%b; }
-  _play(key,cfg={}){ if(this.cache.audio.exists(key)) this.sound.play(key,cfg); }
+  //_play(key,cfg={}){ if(this.cache.audio.exists(key)) this.sound.play(key,cfg); }
 }
