@@ -55,6 +55,7 @@ export class Roulette extends Phaser.Scene {
 
     // Solde + dernier résultat
     this.balanceTxt = this.add.text(16, 16, 'Solde: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
+    this.balance = 0;
     this.lastTxt    = this.add.text(16, 40, 'Dernier: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
     this.BetTxt    = this.add.text(16, 700, '*Jeton vert (réduire mise), jeton rouge (augmenter mise)', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
 
@@ -76,7 +77,7 @@ export class Roulette extends Phaser.Scene {
 
     // Spin & Clear
     const spin = this._imageBtn(W/2, H-110, 'spinBtn', async ()=>{ await this._doSpin(); });
-    if (spin) spin.setScale(0.4);
+    if (spin) spin.setScale(0.15);
 
     const clear = this._imageBtn(W/2, H-60, 'clearBtn', async ()=>{
       await this._clearBets(); this._toast('Mises effacées.');
@@ -103,8 +104,28 @@ export class Roulette extends Phaser.Scene {
     });
 
     // Grille 0..36 (clic = plein)
-    const grid = { left: 24, top: 100, cellW: 56, cellH: 40, gap: 6 };
+    const cellW = 56;
+    const cellH = 40;
+    const gap   = 6;
+
+    // Calcul automatique pour centrer
+    const tableWidth = 3 * cellW + 2 * gap;
+    const tableLeft  = (W - tableWidth) / 2 - 250; // décallage à gauche
+
+    // Position de départ en hauteur
+    const top = 100;
+
+    // Grille centrée
+    const grid = {
+        left: tableLeft,
+        top: top,
+        cellW: cellW,
+        cellH: cellH,
+        gap: gap
+    };
+
     this._buildNumberGrid(grid);
+
 
     // mettre les types de mises sous la table
     const placeBetButtons = ()=>{
@@ -139,6 +160,7 @@ export class Roulette extends Phaser.Scene {
     this._btn(24+200,   24+56,      'Dozen 3',  async ()=> this._placeParamBet('DOZEN',3));
     this._btn(24,       24+56+40,   'Column 1', async ()=> this._placeParamBet('COLUMN',1));
     this._btn(24+100,   24+56+40,   'Column 2', async ()=> this._placeParamBet('COLUMN',2));
+    this._btn(24+200,   24+56+40,   'Column 3', async ()=> this._placeParamBet('COLUMN',3));
     this._btn(24+200,   24+56+40,   'Column 3', async ()=> this._placeParamBet('COLUMN',3));
 
     // Init
@@ -228,6 +250,38 @@ export class Roulette extends Phaser.Scene {
     this.time.delayedCall(900, ()=> this._setStatus(), null, this);
   }
 
+  // --- Balance helpers (local truth) ---
+  _initBalance(n){
+    this.balanceVal = Number(n) || 0;
+    if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balanceVal));
+  }
+  _applyCredit(n){
+    this.balanceVal = (Number(this.balanceVal)||0) + (Number(n)||0);
+    if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balanceVal));
+  }
+  _applyDebit(n){
+    n = Number(n)||0;
+    if ((Number(this.balanceVal)||0) < n) return false; // fonds insuffisants
+    this.balanceVal -= n;
+    if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balanceVal));
+    return true;
+  }
+  _currentStake(){
+    return this.localBets.reduce((t,b)=> t + Number(b.amount||0), 0);
+  }
+
+
+  _setBalance(v){
+    this.balance = Math.max(0, Number(v) || 0);
+    if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balance));
+  }
+  _canStake(amt){ return this.balance >= Number(amt || 0); }
+  _applyDebit(amt){ this._setBalance(this.balance - Number(amt || 0)); }
+  _applyCredit(amt){ this._setBalance(this.balance + Number(amt || 0)); }
+  _currentStake(){
+    return this.localBets.reduce((s,b)=> s + Number(b.amount || 0), 0);
+  }
+
   // ---------- Grille numéros ----------
   _buildNumberGrid({ left, top, cellW, cellH, gap }){
     // 0
@@ -313,7 +367,7 @@ export class Roulette extends Phaser.Scene {
     try{
       const s = await api('api/roulette/state', { method:'GET' });
       if (typeof s.balance !== 'undefined'){
-        this.balanceTxt.setText('Solde: ' + this._euro(s.balance));
+        this._setBalance(s.balance);
       }
       if (Array.isArray(s.bets)){
         this.localBets = s.bets.map(b=>({ type:b.type, amount:b.amount, param:b.param ?? null }));
@@ -326,16 +380,23 @@ export class Roulette extends Phaser.Scene {
       }
     }catch(e){
       // Pas de serveur : démarre avec un solde fictif
-      this.balanceTxt.setText('Solde: ' + this._euro(1000));
+      this._setBalance(1000);
     }
   }
 
   async _addBet({ type, amount, param }){
     const body = { type, amount:Number(amount) };
+    const stake = Number(amount);
+    if (!this._canStake(stake)) {
+      this._toast("Solde insuffisant");
+      return;
+    }
+
+    this._applyDebit(stake);
     if (param!=null) body.param = param;
     try{
       const r = await api('api/roulette/bets', { method:'POST', body });
-      if (r.balance!=null) this.balanceTxt.setText('Solde: ' + this._euro(r.balance));
+      if (r.balance != null) this._setBalance(r.balance);
       if (Array.isArray(r.bets)){
         this.localBets = r.bets.map(b=>({ type:b.type, amount:b.amount, param:b.param ?? null }));
       } else {
@@ -353,12 +414,20 @@ export class Roulette extends Phaser.Scene {
   }
 
   async _clearBets(){
-    try{
+    // on calcule le remboursement AVANT de vider les mises
+    const refund = this._currentStake();
+
+    try {
       await api('api/roulette/bets', { method:'DELETE' });
-    }catch{}
-    this.localBets = [];
-    this._renderBets();
-    this._clearChips();
+    } catch (e) {
+      // optionnel: console.warn('DELETE bets failed', e);
+    } finally {
+      if (refund > 0) this._applyCredit(refund);
+      this.localBets = [];
+      this._renderBets();
+      this._clearChips();
+      this._setSpinEnabled(false);
+    }
   }
 
   async _doSpin(){
