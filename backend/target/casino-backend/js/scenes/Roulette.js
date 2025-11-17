@@ -243,33 +243,48 @@ export class Roulette extends Phaser.Scene {
 
     // --- Boutons COLUMN 1/2/3 au-dessus des cases 1, 2 et 3 ---
     const placeColumnButtons = () => {
-    const c1 = this.numCells[1];
-    const c2 = this.numCells[2];
-    const c3 = this.numCells[3];
-    if (!c1 || !c2 || !c3) return;
-        // Y au-dessus de la première ligne (cases 1,2,3)
-          const margin = 12; // marge verticale au-dessus de la case
-          const yAbove = c1.cy - c1.h / 2 - margin;
+      const c1 = this.numCells[1];
+      const c2 = this.numCells[2];
+      const c3 = this.numCells[3];
+      if (!c1 || !c2 || !c3) return;
 
-          // Largeur = largeur d'une case (optionnel, sinon _btn utilise w=90 par défaut)
-          const btnW = c1.w;
+      const margin = 25; // marge verticale au-dessus de la case
+      const yAbove = c1.cy - c1.h / 2 - margin;
 
-          this._btn(c1.cx, yAbove, 'Column 1',
-            async () => await this._placeParamBet('COLUMN', 1),
-            btnW
-          );
-          this._btn(c2.cx, yAbove, 'Column 2',
-            async () => await this._placeParamBet('COLUMN', 2),
-            btnW
-          );
-          this._btn(c3.cx, yAbove, 'Column 3',
-            async () => await this._placeParamBet('COLUMN', 3),
-            btnW
-          );
-        };
+      const btnW = c1.w;
+      const btnH = 32;     // un peu moins haut si tu veux
+      const fontSize = 12; // << plus petit ici
 
-        placeColumnButtons();
-        this.time.delayedCall(0, placeColumnButtons);
+      this._btn(
+        c1.cx, yAbove, 'Column 1',
+        async () => await this._placeParamBet('COLUMN', 1),
+        btnW, btnH, fontSize
+      );
+      this._btn(
+        c2.cx, yAbove, 'Column 2',
+        async () => await this._placeParamBet('COLUMN', 2),
+        btnW, btnH, fontSize
+      );
+      this._btn(
+        c3.cx, yAbove, 'Column 3',
+        async () => await this._placeParamBet('COLUMN', 3),
+        btnW, btnH, fontSize
+      );
+    };
+
+    placeColumnButtons();
+    this.time.delayedCall(0, placeColumnButtons);
+
+        // Lecture de l'état initial (solde, mises, dernier tirage) auprès de l'API
+        this._setStatus();
+
+        // 1) On initialise le solde avec /api/me (toujours dispo après login)
+        this._bootstrapBalance().catch(()=>{});
+
+        // 2) On complète avec /api/roulette/state (mises + dernier tirage + éventuel balance spécifique)
+        this._getState().catch(()=>{});
+
+
 
     // --- Boutons RED / BLACK / EVEN / ODD / 1-18 / 19-36 sur le côté du tapis ---
 
@@ -323,14 +338,43 @@ export class Roulette extends Phaser.Scene {
       btn.add([bg, tx]);
     });
 
-    // Boutons pour les douzaines et les colonnes (mises de type DOZEN / COLUMN)
-    this._btn(100,       24+56,      'Dozen 1',  async ()=> this._placeParamBet('DOZEN',1));
-    this._btn(100+100,   24+56,      'Dozen 2',  async ()=> this._placeParamBet('DOZEN',2));
-    this._btn(100+200,   24+56,      'Dozen 3',  async ()=> this._placeParamBet('DOZEN',3));
+        // Boutons pour les douzaines (mises de type DOZEN)
+        const dozenLayout = {
+          startX: 85,   // X du premier bouton (déplace tout le groupe en X)
+          gapX:   85,   // espace horizontal entre chaque bouton
+          y:      24 + 56 + 40, // position Y commune (descendre = augmenter)
+          w:      70,   // largeur des boutons
+          h:      40     // hauteur des boutons
+        };
 
-    // Lecture de l'état initial (solde, mises, dernier tirage) auprès de l'API
-    this._setStatus();
-    this._getState().catch(()=>{});
+        this._btn(
+          dozenLayout.startX,
+          dozenLayout.y,
+          'Dozen 1',
+          async () => this._placeParamBet('DOZEN', 1),
+          dozenLayout.w,
+          dozenLayout.h
+        );
+
+        this._btn(
+          dozenLayout.startX + dozenLayout.gapX,
+          dozenLayout.y,
+          'Dozen 2',
+          async () => this._placeParamBet('DOZEN', 2),
+          dozenLayout.w,
+          dozenLayout.h
+        );
+
+        this._btn(
+          dozenLayout.startX + dozenLayout.gapX * 2,
+          dozenLayout.y,
+          'Dozen 3',
+          async () => this._placeParamBet('DOZEN', 3),
+          dozenLayout.w,
+          dozenLayout.h
+        );
+
+
   }
 
 
@@ -392,7 +436,43 @@ export class Roulette extends Phaser.Scene {
       }
       this.wheelGroup.add(cursor);
     }
+
+    // Curseur statique qui indique la case gagnante lorsque la roue s'arrête
+    if (this.textures.exists('StaticCursor')){
+      const ref = this.wheel;
+      const radius = ref ? (ref.displayWidth/2) : (maxSize/2);
+      const cursor = this.add.image(0, -radius - 0, 'StaticCursor');
+      if (cursor.width && cursor.height){
+        const cs = Math.min(40/cursor.width, 40/cursor.height);
+        cursor.setScale(cs);
+      }
+      this.wheelGroup.add(cursor);
+    }
+
+    // ------------------------------------------------------------------
+    // Bouton "Spin" manuel - DEBUG ONLY
+    // ------------------------------------------------------------------
+    // Passe DEBUG_SPIN_BUTTON à true si tu veux le revoir pour débug.
+    const DEBUG_SPIN_BUTTON = false;
+
+    if (DEBUG_SPIN_BUTTON && this.wheel) {
+      const wheelBottom = this.wheelGroup.y + (this.wheel.displayHeight / 2);
+
+      const spin = this._imageBtn(
+        this.wheelGroup.x,    // centré sous la roue
+        wheelBottom + 100,    // 100 px sous la roue
+        'spinBtn',
+        async () => { await this._doSpin(); }
+      );
+      if (spin) {
+        spin.setScale(0.15);
+        this.spinBtn = spin;  // si tu veux le manipuler ailleurs
+      }
+    }
   }
+
+
+
 
       /**
        * Mapping de la roue (roulette européenne, 0 en haut).
@@ -477,45 +557,40 @@ export class Roulette extends Phaser.Scene {
 
 
   /**
-   * Crée un bouton rectangulaire simple avec un label centré.
    * @param {number} x position X
    * @param {number} y position Y
    * @param {string} label texte à afficher
    * @param {Function} on callback appelé au clic
-   * @param {number} [w=120] largeur du bouton
-   * @returns {Phaser.GameObjects.Container} conteneur du bouton
+   * @param {number} [w=90]  largeur du bouton
+   * @param {number} [h=60]  hauteur du bouton
+   * @param {number} [fontSize=14] taille de police du label
    */
-  _btn(x, y, label, on, w = 90) {
+  _btn(x, y, label, on, w = 90, h = 60, fontSize = 14) {
     const c = this.add.container(x, y);
 
-    // Couleur par défaut
     let bgColor = 0x14253a;
     let textColor = '#eaffff';
 
-    // Cas particuliers : RED et BLACK
-    if (label === 'RED') {
-      bgColor = 0xb00000;   // rouge
-    }
-    if (label === 'BLACK') {
-      bgColor = 0x000000;   // noir
-    }
+    if (label === 'RED')   bgColor = 0xb00000;
+    if (label === 'BLACK') bgColor = 0x000000;
 
-    const bg = this.add.rectangle(0, 0, w, 60, bgColor)
+    const bg = this.add.rectangle(0, 0, w, h, bgColor)
       .setStrokeStyle(1, 0x6fb1ff)
       .setInteractive({ useHandCursor: true });
 
     const tx = this.add.text(0, 0, label, {
       fontFamily: 'monospace',
-      fontSize: 14,
+      fontSize: fontSize,
       color: textColor
     }).setOrigin(0.5);
 
     bg.on('pointerdown', () => bg.setScale(0.98));
-    bg.on('pointerup', () => { bg.setScale(1); on && on(); });
+    bg.on('pointerup',   () => { bg.setScale(1); on && on(); });
 
     c.add([bg, tx]);
     return c;
   }
+
 
   /**
    * Crée un bouton basé sur une image si la texture existe,
@@ -538,6 +613,22 @@ export class Roulette extends Phaser.Scene {
       return this._btn(x,y,key, on, 120);
     }
   }
+
+  /**
+   * Récupère le solde global du joueur via /api/me
+   * pour initialiser l'affichage du solde dès l'entrée en scène.
+   */
+  async _bootstrapBalance(){
+    try {
+      const me = await api('api/me', { method:'GET' });
+      if (me && typeof me.credits !== 'undefined'){
+        this._setBalance(me.credits);
+      }
+    } catch(e){
+      // on ignore, _getState() prendra le relais ou on gardera "Solde: —"
+    }
+  }
+
 
   /**
    * Met à jour le message affiché dans la zone de statut.
@@ -603,13 +694,18 @@ export class Roulette extends Phaser.Scene {
   }
 
   /**
-   * Met à jour la variable de solde principale utilisée pour l'affichage.
+   * Met à jour le solde (valeur de référence côté front).
    * @param {number} v nouveau solde
    */
   _setBalance(v){
-    this.balance = Math.max(0, Number(v) || 0);
-    if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balance));
+    const n = Math.max(0, Number(v) || 0);
+    this.balance    = n;
+    this.balanceVal = n; // <== important pour _canStake, _applyDebit, etc.
+    if (this.balanceTxt){
+      this.balanceTxt.setText('Solde: ' + this._euro(n));
+    }
   }
+
 
   /**
    * Indique si le joueur peut miser un certain montant au vu de son solde.
