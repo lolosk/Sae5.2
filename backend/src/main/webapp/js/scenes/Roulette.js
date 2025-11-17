@@ -187,6 +187,36 @@ export class Roulette extends Phaser.Scene {
     placeBetButtons();
     this.time.delayedCall(0, placeBetButtons);
 
+    // --- Boutons COLUMN 1/2/3 au-dessus des cases 1, 2 et 3 ---
+    const placeColumnButtons = () => {
+    const c1 = this.numCells[1];
+    const c2 = this.numCells[2];
+    const c3 = this.numCells[3];
+    if (!c1 || !c2 || !c3) return;
+        // Y au-dessus de la première ligne (cases 1,2,3)
+          const margin = 12; // marge verticale au-dessus de la case
+          const yAbove = c1.cy - c1.h / 2 - margin;
+
+          // Largeur = largeur d'une case (optionnel, sinon _btn utilise w=90 par défaut)
+          const btnW = c1.w;
+
+          this._btn(c1.cx, yAbove, 'Column 1',
+            async () => await this._placeParamBet('COLUMN', 1),
+            btnW
+          );
+          this._btn(c2.cx, yAbove, 'Column 2',
+            async () => await this._placeParamBet('COLUMN', 2),
+            btnW
+          );
+          this._btn(c3.cx, yAbove, 'Column 3',
+            async () => await this._placeParamBet('COLUMN', 3),
+            btnW
+          );
+        };
+
+        placeColumnButtons();
+        this.time.delayedCall(0, placeColumnButtons);
+
     // --- Boutons RED / BLACK / EVEN / ODD / 1-18 / 19-36 sur le côté du tapis ---
 
     const quicks = [
@@ -243,9 +273,6 @@ export class Roulette extends Phaser.Scene {
     this._btn(100,       24+56,      'Dozen 1',  async ()=> this._placeParamBet('DOZEN',1));
     this._btn(100+100,   24+56,      'Dozen 2',  async ()=> this._placeParamBet('DOZEN',2));
     this._btn(100+200,   24+56,      'Dozen 3',  async ()=> this._placeParamBet('DOZEN',3));
-    this._btn(100,       24+56+40,   'Column 1', async ()=> this._placeParamBet('COLUMN',1));
-    this._btn(100+100,   24+56+40,   'Column 2', async ()=> this._placeParamBet('COLUMN',2));
-    this._btn(100+200,   24+56+40,   'Column 3', async ()=> this._placeParamBet('COLUMN',3));
 
     // Lecture de l'état initial (solde, mises, dernier tirage) auprès de l'API
     this._setStatus();
