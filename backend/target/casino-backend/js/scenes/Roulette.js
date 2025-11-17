@@ -27,7 +27,7 @@ export class Roulette extends Phaser.Scene {
     // Images de décor et d'interface (fond, boutons principaux)
     L('rouletteBg',        'assets/roulette/bgRoulette.png');
     L('spinBtn',           'assets/roulette/spin-roulette.png');
-    L('clearBtn',          'assets/roulette/clear.png'); // Bouton pour effacer les mises
+    //L('clearBtn',          'assets/roulette/clear.png'); // Bouton pour effacer les mises
 
     // Jetons (boutons visuels pour ajuster la mise de base)
     L('GreenChipsBtn',     'assets/roulette/green-chips.png');
@@ -39,7 +39,16 @@ export class Roulette extends Phaser.Scene {
     L('StaticCursor',      'assets/roulette/triangle.png');
 
     // Panneau affichant le détail des mises
-    L('panel',             'assets/roulette/panel.png');
+    //L('panel',             'assets/roulette/panel.png');
+
+    // --- SFX roulette ---
+    this.load.audio('roulette_spin',      'assets/roulette/sfx/spinning_roulette.mp3');
+    this.load.audio('roulette_win',       'assets/roulette/sfx/player_win.mp3');
+    this.load.audio('roulette_place',     'assets/roulette/sfx/placing_bet.mp3');
+    this.load.audio('roulette_timeout',   'assets/roulette/sfx/time_out_bet.mp3');
+    this.load.audio('roulette_tic_slow',  'assets/roulette/sfx/slow_tic_tac.mp3');
+    this.load.audio('roulette_tic_fast',  'assets/roulette/sfx/fast_tic_tac.mp3');
+
   }
 
 
@@ -107,18 +116,56 @@ export class Roulette extends Phaser.Scene {
     }).setDepth(31);
 
 
+
+    // --- SFX instanciés ---
+    this.sfx = {
+      spin:    this.sound.add('roulette_spin'),
+      win:     this.sound.add('roulette_win'),
+      place:   this.sound.add('roulette_place'),
+      timeout: this.sound.add('roulette_timeout'),
+      slow:    this.sound.add('roulette_tic_slow', { loop:true }),
+      fast:    this.sound.add('roulette_tic_fast', { loop:true })
+    };
+
+    // --- Timer de manche (30s + spin auto) ---
+    this.roundDuration = 30;
+    this.roundTimeLeft = this.roundDuration;
+    this.bettingOpen   = true;   // true = on peut miser
+    this.timerPhase    = null;   // 'slow' | 'fast' | 'locked' | 'none'
+
+    // Affichage du temps en haut-droite
+    this.timerTxt = this.add.text(W-16, 40, 'Temps: 30s', {
+      fontFamily:'monospace', fontSize:16, color:'#ffeb99'
+    }).setOrigin(1,0);
+
+    this._updateTimerText();
+    this._switchTimerPhase('slow'); // 30s -> 20s : tic tac lent
+
+    // Événement qui décrémente chaque seconde
+    this.timerEvent = this.time.addEvent({
+      delay: 1000,
+      loop: true,
+      callback: () => this._onTimerTick()
+    });
+
+
+
     // Bouton "Spin" : lance un tirage de roulette via le backend
     if (this.wheel) {
       const wheelBottom = this.wheelGroup.y + (this.wheel.displayHeight / 2);
 
       const spin = this._imageBtn(
-        this.wheelGroup.x,          // centré sous la roue
-        wheelBottom + 100,           // 60 px sous la roue (ajuste comme tu veux)
+        this.wheelGroup.x,        // centré sous la roue
+        wheelBottom + 100,        // 100 px sous la roue
         'spinBtn',
         async ()=>{ await this._doSpin(); }
       );
-      if (spin) spin.setScale(0.15);
+      if (spin){
+        spin.setScale(0.15);
+        this.spinBtn = spin;      // on garde une référence pour _setSpinEnabled
+      }
     }
+
 
     // Paramètres de base pour la grille de numéros
     const cellW = 56;
@@ -161,7 +208,7 @@ export class Roulette extends Phaser.Scene {
         c34.cy + c34.h / 2,
         c35.cy + c35.h / 2,
         c36.cy + c36.h / 2
-      ) + 18;
+      ) + 27;
 
       // Jeton rouge sous le 34 (miser moins)
       const small_chip = this._imageBtn(c34.cx, yBelow, 'RedChipsBtnchip', () => {
@@ -169,7 +216,7 @@ export class Roulette extends Phaser.Scene {
         this._setStatus();
         this._toast(`Bet − : ${this.betUnit}`);
       });
-      if (small_chip) small_chip.setScale(0.03).setDepth(60);
+      if (small_chip) small_chip.setScale(0.045).setDepth(60);
 
       // Bouton CLEAR sous le 35
       const clearBtn = this._imageBtn(c35.cx, yBelow, 'clearBtn', () => {
@@ -179,7 +226,7 @@ export class Roulette extends Phaser.Scene {
         // On lance le nettoyage des mises (asynchrone, mais on ne l’attend pas ici)
         this._clearBets().catch(()=>{});
       });
-      if (clearBtn) clearBtn.setScale(0.55).setDepth(60);
+      if (clearBtn) clearBtn.setScale(0.6).setDepth(60);
 
       // Jeton vert sous le 36 (miser plus)
       const big_chip = this._imageBtn(c36.cx, yBelow, 'GreenChipsBtn', () => {
@@ -187,7 +234,7 @@ export class Roulette extends Phaser.Scene {
         this._setStatus();
         this._toast(`Bet + : ${this.betUnit}`);
       });
-      if (big_chip) big_chip.setScale(0.03).setDepth(60);
+      if (big_chip) big_chip.setScale(0.045).setDepth(60);
     };
 
     // On essaie d'ajouter les boutons immédiatement puis une fois la grille finalisée
@@ -411,7 +458,7 @@ export class Roulette extends Phaser.Scene {
        * @param {number} [duration=2000] Durée de l'anim en ms
        * @returns {Promise<void>}
        */
-      _spinWheelToNumber(num, duration = 2000){
+      _spinWheelToNumber(num, duration = 8000){
         if (!this.wheel) return Promise.resolve();
 
         const targetAngle = this._angleForNumber(num);
@@ -728,39 +775,49 @@ export class Roulette extends Phaser.Scene {
     }
   }
 
-  /**
-   * Ajoute une mise (plein, dozen, colonne, etc.) côté client et côté serveur.
-   * Gère aussi le débit du solde local.
-   * @param {Object} params informations de mise (type, amount, param)
-   */
-  async _addBet({ type, amount, param }){
-    const body = { type, amount:Number(amount) };
-    const stake = Number(amount);
-    if (!this._canStake(stake)) {
-      this._toast("Solde insuffisant");
-      return;
+    /**
+     * Ajoute une mise (plein, dozen, colonne, etc.) côté client et côté serveur.
+     * Gère aussi le débit du solde local + SFX.
+     */
+    async _addBet({ type, amount, param }){
+      // Mises interdites quand le timer <= 10s
+      if (this.bettingOpen === false){
+        this._toast('Mises closes pour ce tour');
+        return;
+      }
+
+      const body  = { type, amount:Number(amount) };
+      const stake = Number(amount);
+
+      if (!this._canStake(stake)) {
+        this._toast("Solde insuffisant");
+        return;
+      }
+
+      // Débit local + son de mise
+      this._applyDebit(stake);
+      this._playSfx('place');
+
+      if (param!=null) body.param = param;
+      try{
+        const r = await api('api/roulette/bets', { method:'POST', body });
+        if (r.balance != null) this._setBalance(r.balance);
+        if (Array.isArray(r.bets)){
+          this.localBets = r.bets.map(b=>({ type:b.type, amount:b.amount, param:b.param ?? null }));
+        } else {
+          this.localBets.push({ type, amount:Number(amount), param: param ?? null });
+        }
+        this._renderBets();
+        if (type==='STRAIGHT' && param!=null) this._addChipOnNumber(param);
+      }catch(e){
+        // Si la requête échoue, on garde au moins la logique locale des mises
+        this.localBets.push({ type, amount:Number(amount), param: param ?? null });
+        this._renderBets();
+        if (type==='STRAIGHT' && param!=null) this._addChipOnNumber(param);
+        throw e;
+      }
     }
 
-    this._applyDebit(stake);
-    if (param!=null) body.param = param;
-    try{
-      const r = await api('api/roulette/bets', { method:'POST', body });
-      if (r.balance != null) this._setBalance(r.balance);
-      if (Array.isArray(r.bets)){
-        this.localBets = r.bets.map(b=>({ type:b.type, amount:b.amount, param:b.param ?? null }));
-      } else {
-        this.localBets.push({ type, amount:Number(amount), param: param ?? null });
-      }
-      this._renderBets();
-      if (type==='STRAIGHT' && param!=null) this._addChipOnNumber(param);
-    }catch(e){
-      // Si la requête échoue, on garde au moins la logique locale des mises
-      this.localBets.push({ type, amount:Number(amount), param: param ?? null });
-      this._renderBets();
-      if (type==='STRAIGHT' && param!=null) this._addChipOnNumber(param);
-      throw e;
-    }
-  }
 
   /**
    * Efface toutes les mises courantes.
@@ -786,64 +843,78 @@ export class Roulette extends Phaser.Scene {
     /**
      * Lance un tour de roulette synchronisé :
      * - appelle l’API qui renvoie le numéro gagnant,
-     * - anime la roue pour que ce numéro arrive sous le curseur,
-     * - met à jour solde, mises, dernier tirage.
+     * - joue le son de spin,
+     * - anime la roue (8s) jusqu'au bon numéro,
+     * - met à jour solde, mises, dernier tirage,
+     * - relance un nouveau timer de 30s.
      */
-      async _doSpin(){
-        if (this._spinning) return;
-        this._spinning = true;
-        this._setStatus('Spinning...');
+    async _doSpin(){
+      if (this._spinning) return;
+      this._spinning = true;
+      this.bettingOpen = false;          // on ferme les mises pendant le spin
+      this._setStatus('Spinning...');
+      this._switchTimerPhase('none');    // on coupe les tic-tac
+      this._playSfx('spin');             // son de 8s
 
-        try {
-          // 1) Appel backend
-          const r = await api('api/roulette/spin', { method:'POST' });
+      try {
+        // 1) Appel backend
+        const r = await api('api/roulette/spin', { method:'POST' });
 
-          const resultNumber = (r.result && typeof r.result.number !== 'undefined')
-            ? Number(r.result.number)
-            : Phaser.Math.Between(0,36);
+        const resultNumber = (r.result && typeof r.result.number !== 'undefined')
+          ? Number(r.result.number)
+          : Phaser.Math.Between(0,36);
 
-          // 2) Animation de la roue jusqu'au bon numéro
-          await this._spinWheelToNumber(resultNumber, 2000);
+        // 2) Animation de la roue jusqu'au bon numéro (8s)
+        await this._spinWheelToNumber(resultNumber);
 
-          // 3) MAJ affichage (dernier tirage, solde, mises...)
-          if (r.result){
-            const { number, color } = r.result;
-            this.lastTxt.setText(`Dernier: ${number} (${String(color).toUpperCase()})`);
-          }
-
-          if (r.balance != null){
-            this.balanceTxt.setText('Solde: ' + this._euro(r.balance));
-            this.game.events.emit('credits:update', r.balance);
-          }
-
-          this.localBets = [];
-          this._renderBets();
-          this._clearChips();
-
-          if (r.gain && Number(r.gain) > 0){
-            this._flashWin();
-            this._setStatus(`WIN +${this._euro(r.gain)}`);
-          } else {
-            this._setStatus('No win');
-          }
-
-        } catch(e){
-          // Fallback offline : on garde la synchro roue ↔ numéro
-          const n = Phaser.Math.Between(0,36);
-          await this._spinWheelToNumber(n, 2000);
-
-          const reds = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
-          const color = (n===0) ? 'GREEN' : (reds.has(n)?'RED':'BLACK');
-          this.lastTxt.setText(`Dernier: ${n} (${color})`);
-
-          this.localBets = [];
-          this._renderBets();
-          this._clearChips();
-          this._setStatus('No win (offline)');
+        // 3) MAJ affichage (dernier tirage, solde, mises...)
+        if (r.result){
+          const { number, color } = r.result;
+          this.lastTxt.setText(`Dernier: ${number} (${String(color).toUpperCase()})`);
         }
 
-        this._spinning = false;
+        if (r.balance != null){
+          this._setBalance(r.balance);
+          this.game.events.emit('credits:update', r.balance);
+        }
+
+        this.localBets = [];
+        this._renderBets();
+        this._clearChips();
+
+        if (r.gain && Number(r.gain) > 0){
+          this._playSfx('win');
+          this._flashWin();
+          this._setStatus(`WIN +${this._euro(r.gain)}`);
+        } else {
+          this._setStatus('No win');
+        }
+
+      } catch(e){
+        // Fallback offline : on garde la synchro roue ↔ numéro
+        const n = Phaser.Math.Between(0,36);
+        await this._spinWheelToNumber(n);
+
+        const reds = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
+        const color = (n===0) ? 'GREEN' : (reds.has(n)?'RED':'BLACK');
+        this.lastTxt.setText(`Dernier: ${n} (${color})`);
+
+        this.localBets = [];
+        this._renderBets();
+        this._clearChips();
+        this._setStatus('No win (offline)');
       }
+
+      // Nouveau round : on réarme le timer 30s et on rouvre les mises
+      this.roundTimeLeft = this.roundDuration || 30;
+      this.bettingOpen   = true;
+      this._updateTimerText();
+      this._switchTimerPhase('slow'); // on repart sur tic-tac lent
+      this._setSpinEnabled(false);    // plus de mises -> spin désactivé jusqu'à nouvelle mise
+
+      this._spinning = false;
+    }
+
 
 
 
@@ -883,6 +954,9 @@ export class Roulette extends Phaser.Scene {
     });
     lines.push(`\nTotal engagé : ${this._euro(total)}`);
     this.betsTxt.setText(lines.join('\n'));
+
+    // Spin possible uniquement s'il y a des mises ET que les mises sont ouvertes
+    this._setSpinEnabled(this.localBets.length > 0 && this.bettingOpen !== false);
   }
 
   /**
@@ -893,4 +967,105 @@ export class Roulette extends Phaser.Scene {
     const r = this.add.rectangle(W/2, H/2, W, H, 0x00ff88, 0.12).setDepth(999);
     this.tweens.add({ targets:r, alpha:0, duration:420, onComplete:()=>r.destroy() });
   }
+
+
+  /**
+   * Lecture sécurisée d'un SFX (on stop si déjà en cours pour éviter les overlaps moches).
+   */
+  _playSfx(key){
+    if (!this.sfx || !this.sfx[key]) return;
+    const snd = this.sfx[key];
+    if (snd.isPlaying) snd.stop();
+    snd.play();
+  }
+
+  /**
+   * Change la phase du timer (slow / fast / locked / none) et gère les tic-tac.
+   */
+  _switchTimerPhase(phase){
+    if (!this.sfx) return;
+    if (this.timerPhase === phase) return;
+
+    // On coupe les loops existants si on quitte slow/fast
+    if (this.timerPhase === 'slow' && this.sfx.slow && this.sfx.slow.isPlaying){
+      this.sfx.slow.stop();
+    }
+    if (this.timerPhase === 'fast' && this.sfx.fast && this.sfx.fast.isPlaying){
+      this.sfx.fast.stop();
+    }
+
+    this.timerPhase = phase;
+
+    if (phase === 'slow' && this.sfx.slow){
+      this.sfx.slow.play();
+    } else if (phase === 'fast' && this.sfx.fast){
+      this.sfx.fast.play();
+    }
+    // 'locked' et 'none' -> juste silence
+  }
+
+  /**
+   * MAJ du texte du timer.
+   */
+  _updateTimerText(){
+    if (!this.timerTxt) return;
+    const t = Math.max(0, Math.round(this.roundTimeLeft || 0));
+    this.timerTxt.setText(`Temps: ${t}s`);
+  }
+
+  /**
+   * Tick du timer de manche (appelé toutes les secondes).
+   * 30->20 : tic tac lent, 20->10 : tic tac rapide, 10 : son de timeout + lock,
+   * 0 : spin auto.
+   */
+  _onTimerTick(){
+    if (this._spinning) return;
+    if (typeof this.roundTimeLeft !== 'number') return;
+
+    if (this.roundTimeLeft > 0){
+      this.roundTimeLeft--;
+      this._updateTimerText();
+
+      if (this.roundTimeLeft === 20){
+        this._switchTimerPhase('fast');  // 20->10 : tic-tac rapide
+      }
+      else if (this.roundTimeLeft === 10){
+        this._switchTimerPhase('locked'); // plus de tic-tac
+        this.bettingOpen = false;         // plus possible de bet < 10s
+        this._playSfx('timeout');         // son de timeout
+        this._toast('Mises closes');
+        this._setSpinEnabled(this.localBets.length > 0 && this.bettingOpen !== false);
+      }
+      else if (this.roundTimeLeft === 0){
+        this._switchTimerPhase('none');
+        this._autoSpinFromTimer();
+      }
+    }
+  }
+
+  /**
+   * Lance un spin automatiquement quand le timer atteint 0.
+   */
+  _autoSpinFromTimer(){
+    // On spin même si pas de mises, comme un vrai casino en continu
+    this._doSpin();
+  }
+
+  /**
+   * Active / désactive visuellement et fonctionnellement le bouton Spin.
+   */
+  _setSpinEnabled(enabled){
+    this.canSpinManually = !!enabled;
+    if (this.spinBtn){
+      if (enabled){
+        this.spinBtn.setAlpha(1).setInteractive({ useHandCursor:true });
+      } else {
+        this.spinBtn.setAlpha(0.4);
+        this.spinBtn.disableInteractive();
+      }
+    }
+  }
+
+
+
 }
