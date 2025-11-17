@@ -3,11 +3,43 @@ import { api } from '../utils/api.js';
 import { playSfx } from '../utils/sfx.js';
 
 export class BlackJack extends Phaser.Scene {
-  constructor(){ super('BlackJack'); }
+  constructor() {
+    super('BlackJack');
+  }
 
   preload() {
-    this.load.image('background', 'assets/menu/bg.png');
-    this.load.image('logo', 'assets/menu/logo.png');
+    // Fond blackjack
+    this.load.image('bg_blackjack', 'assets/blackjack/bg_blackjack.png');
+
+    // Cartes :
+    // le serveur envoie : "AS","10H","KC"...
+    // tes fichiers sont : "AC.png","2C.png",...,"TC.png","JC.png"... dans assets/blackjack/
+    const ranksServer = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+    const suits = ['C', 'D', 'H', 'S']; // trèfle, carreau, coeur, pique
+
+    for (const r of ranksServer) {
+      for (const s of suits) {
+        const key = `${r}${s}`; // ex "10H"
+        const fileRank = (r === '10') ? 'T' : r; // "10" -> "T"
+        const fileName = `${fileRank}${s}`;      // ex "TH"
+        this.load.image(key, `assets/blackjack/${fileName}.png`);
+      }
+    }
+
+    // dos de carte
+    this.load.image('BACK', 'assets/blackjack/BACK.png');
+
+    // JETONS
+    this.load.image('chip5',   'assets/blackjack/chip5.png');
+    this.load.image('chip10',  'assets/blackjack/chip10.png');
+    this.load.image('chip25',  'assets/blackjack/chip25.png');
+    this.load.image('chip100', 'assets/blackjack/chip100.png');
+
+    // JETONS HOVER
+    this.load.image('chip5_hover',   'assets/blackjack/chip5_hover.png');
+    this.load.image('chip10_hover',  'assets/blackjack/chip10_hover.png');
+    this.load.image('chip25_hover',  'assets/blackjack/chip25_hover.png');
+    this.load.image('chip100_hover', 'assets/blackjack/chip100_hover.png');
   }
 
   create() {
@@ -17,150 +49,711 @@ export class BlackJack extends Phaser.Scene {
 
     addSoundToggle(this);
 
-    // Fond + logo
-    this.background = this.add.tileSprite(width/2, height/2, 1280, 720, 'background').setOrigin(0.5);
-    const logo = this.add.image(width/2, height*0.16, 'logo').setOrigin(0.5);
-    const s = Math.min(width*0.40 / logo.width, height*0.20 / logo.height);
-    logo.setScale(s);
-    this.tweens.add({ targets: logo, scaleX:s*1.02, scaleY:s*1.02, duration:1400, ease:'Sine.inOut', yoyo:true, loop:-1 });
+    // --- BACKGROUND ---
+    this.background = this.add.image(width / 2, height / 2, 'bg_blackjack')
+      .setOrigin(0.5);
+    this.background.displayWidth = width;
+    this.background.displayHeight = height;
 
-    // Carte DOM
-    const cardW = Math.min(600, width*0.95);
-    const html = `
-      <style>
-        .card { width:${cardW}px; padding:18px 20px; border-radius:16px;
-          background: rgba(6,12,24,0.75); border:1px solid rgba(255,255,255,0.12);
-          box-shadow:0 12px 36px rgba(0,0,0,.45); color:#eaf4ff; font-family:system-ui, Arial;
-          backdrop-filter: blur(6px);
-        }
-        h2 { margin:0 0 10px; font-size:20px; }
-        .row { display:flex; gap:10px; align-items:center; margin:8px 0; flex-wrap:wrap; }
-        label { font-size:14px; opacity:.9; }
-        input { padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,0.18);
-          background:rgba(255,255,255,0.08); color:#eaf4ff; outline:none; }
-        button { padding:10px 14px; border:none; border-radius:12px; cursor:pointer; color:white; font-weight:700;
-          background:linear-gradient(180deg,#1e90ff,#0b6bd3); box-shadow:0 10px 28px rgba(0,0,0,.35); }
-        button:disabled { opacity:.6; cursor:not-allowed; }
-        .hand { font-size:18px; }
-        .status { margin-top:8px; font-size:16px; }
-        .error { color:#ff8b8b; font-size:13px; display:none; margin-top:6px; }
-        .show { display:block; }
-        .small { font-size:12px; opacity:.8; }
-      </style>
-      <div class="card">
-        <h2>BlackJack</h2>
-        <div class="row">
-          <label for="bet">Mise</label>
-          <input id="bet" type="number" min="1" step="1" value="10" style="width:90px" />
-          <span class="small">Crédits: <strong id="credits">${u0.credits ?? 0}</strong></span>
-          <button id="start">Start</button>
-          <button id="hit" disabled>Hit</button>
-          <button id="stand" disabled>Stand</button>
-        </div>
-        <div class="row hand"><b>Joueur:</b> <span id="p"></span></div>
-        <div class="row hand"><b>Croupier:</b> <span id="d"></span></div>
-        <div id="status" class="status"></div>
-        <div id="err" class="error">Erreur</div>
-      </div>
-    `;
-    const dom = this.add.dom(width/2, height*0.60).createFromHTML(html).setOrigin(0.5);
-    const root = dom.node;
-    const betEl = root.querySelector('#bet');
-    const creditsEl = root.querySelector('#credits');
-    const startBtn = root.querySelector('#start');
-    const hitBtn   = root.querySelector('#hit');
-    const standBtn = root.querySelector('#stand');
-    const pEl = root.querySelector('#p');
-    const dEl = root.querySelector('#d');
-    const statusEl = root.querySelector('#status');
-    const errEl = root.querySelector('#err');
+    // --- POSITIONS DES MAINS ---
+    const dealerY = height * 0.25;
+    const playerY = height * 0.55;
 
-    const showState = (state) => {
-      pEl.textContent = state.player.join(' ');
-      dEl.textContent = state.dealer.join(' ');
-      statusEl.textContent = (state.status === 'playing') ? 'À toi de jouer…' : `Résultat: ${state.status}`;
+    // --- GROUPES DE CARTES ---
+    this.dGroup = this.add.container(width / 2, dealerY); // croupier
+    this.pGroup = this.add.container(width / 2, playerY); // joueur
+
+    this.cardScale = Math.min(0.35, width / 1500);
+    this.cardGap = 65 * this.cardScale;
+
+    // --- DECK VISUEL (vrai paquet dans un sabot) ---
+    this.deckX = width * 0.22;
+    this.deckY = dealerY;
+
+    // container pour le sabot + la pile
+    this.deckContainer = this.add.container(this.deckX, this.deckY);
+
+    // taille approximative d'une carte pour le sabot
+    const cardW = 140 * this.cardScale;
+    const cardH = 200 * this.cardScale;
+
+    // sabot (support noir/gris sous la pile)
+    const shoe = this.add.rectangle(-cardW * 0.1, cardH * 0.05, cardW * 1.2, cardH * 1.1, 0x000000, 0.25)
+      .setOrigin(0.5)
+      .setAngle(-6);
+    this.deckContainer.add(shoe);
+
+    // pile de dos de cartes, bien décalés
+    const layers = 4;
+    for (let i = 0; i < layers; i++) {
+      const back = this.add.image(-i * 3, -i * 2, 'BACK')
+        .setOrigin(0.5)
+        .setScale(this.cardScale * 0.98)
+      this.deckContainer.add(back);
+    }
+
+
+    // 🔢 VALEURS DES MAINS → à droite, au niveau du bas des cartes
+    const valueOffsetX = 120;
+    const valueOffsetY = height * 0.06;
+
+    this.dValueText = this.add.text(width / 2 + valueOffsetX, dealerY + valueOffsetY, '', {
+      fontFamily: 'Arial',
+      fontSize: '24px',
+      color: '#ffffff'
+    }).setOrigin(0, 0.5);
+
+    this.pValueText = this.add.text(width / 2 + valueOffsetX, playerY + valueOffsetY, '', {
+      fontFamily: 'Arial',
+      fontSize: '24px',
+      color: '#ffffff'
+    }).setOrigin(0, 0.5);
+
+    // --- FONCTION D'AFFICHAGE DES CARTES ---
+    const renderHand = (codes, group) => {
+      group.removeAll(true);
+      if (!codes || !codes.length) return;
+
+      const totalW = (codes.length - 1) * this.cardGap;
+      let x = -totalW / 2;
+
+      for (const code of codes) {
+        const key = (code === '??') ? 'BACK' : code;
+        const img = this.add.image(x, 0, key)
+          .setOrigin(0.5)
+          .setScale(this.cardScale);
+        group.add(img);
+        x += this.cardGap;
+      }
     };
 
-    startBtn.addEventListener('click', async () => {
-      errEl.classList.remove('show'); statusEl.textContent = '';
-      const bet = parseInt(betEl.value, 10) || 0;
-      if (bet <= 0) { errEl.textContent='Mise invalide'; errEl.classList.add('show'); return; }
-      startBtn.disabled = hitBtn.disabled = standBtn.disabled = true;
-      try {
-        const res = await api('api/blackjack/start', { method:'POST', body:{ bet } });
-        showState(res.state);
-        creditsEl.textContent = res.credits;
-        this._playing = true;
-        startBtn.disabled = true;
-        hitBtn.disabled = false;
-        standBtn.disabled = false;
+    // --- CALCUL LOCAL DE LA VALEUR D'UNE MAIN ---
+    const handValue = (cards) => {
+      if (!cards) return 0;
+      let total = 0;
+      let aces = 0;
 
-        // MAJ HUD
-        const user = this.registry.get('user') || {};
-        user.credits = res.credits;
-        this.registry.set('user', user);
-        this.game.events.emit('credits:update', res.credits);
+      for (const c of cards) {
+        if (c === '??') continue; // ignore la carte cachée
+        const r = c.substring(0, c.length - 1); // "A","2","10","J"...
 
-      } catch (e) {
-        if (e.status === 409) errEl.textContent = 'Crédits insuffisants.';
-        else if (e.status === 401) { errEl.textContent = 'Session expirée.'; this.scene.start('Login'); return; }
-        else errEl.textContent = 'Erreur serveur.';
-        errEl.classList.add('show');
-      } finally {
-        // si erreur, réactiver start
-        if (!this._playing) startBtn.disabled = false;
-      }
-    });
-
-    hitBtn.addEventListener('click', async () => {
-      errEl.classList.remove('show');
-      hitBtn.disabled = standBtn.disabled = true;
-      try {
-        const res = await api('api/blackjack/hit', { method:'POST' });
-        showState(res.state);
-        // si bust → fin
-        if (res.state.status !== 'playing') {
-          this._playing = false;
-          startBtn.disabled = false;
-          playSfx?.(this, 'ui_hover');
+        if (r === 'A') {
+          aces++;
+          total += 11;
+        } else if (r === 'K' || r === 'Q' || r === 'J') {
+          total += 10;
+        } else if (r === '10') {
+          total += 10;
         } else {
-          // encore ton tour
-          hitBtn.disabled = false;
-          standBtn.disabled = false;
+          total += parseInt(r, 10);
         }
-      } catch (e) {
-        errEl.textContent = (e.status===401)?'Session expirée.':'Erreur serveur.'; errEl.classList.add('show');
-        if (e.status===401) this.scene.start('Login');
       }
-    });
 
-    standBtn.addEventListener('click', async () => {
-      errEl.classList.remove('show');
-      hitBtn.disabled = standBtn.disabled = true;
-      try {
-        const res = await api('api/blackjack/stand', { method:'POST' });
-        showState(res.state);
-        statusEl.textContent += res.payout ? ` (+${res.payout})` : '';
-        creditsEl.textContent = res.credits;
+      while (total > 21 && aces > 0) {
+        total -= 10;
+        aces--;
+      }
+      return total;
+    };
 
-        // fin de main
-        this._playing = false;
-        startBtn.disabled = false;
+    // --- HUD TEXTE ---
+    this.add.text(width / 2, height * 0.05, 'BlackJack', {
+      fontFamily: 'Arial',
+      fontSize: '32px',
+      color: '#ffffff'
+    }).setOrigin(0.5);
 
-        // MAJ HUD
-        const user = this.registry.get('user') || {};
-        user.credits = res.credits;
-        this.registry.set('user', user);
-        this.game.events.emit('credits:update', res.credits);
+    this.bet = 10;
 
+    this.betText = this.add.text(width * 0.34, height * 0.88, `Mise : ${this.bet}`, {
+      fontFamily: 'Arial',
+      fontSize: '20px',
+      color: '#ffffff'
+    }).setOrigin(0.5);
+
+    this.creditsText = this.add.text(width * 0.78, height * 0.88, `Crédits : ${u0.credits ?? 0}`, {
+      fontFamily: 'Arial',
+      fontSize: '20px',
+      color: '#ffffff'
+    }).setOrigin(0.5);
+
+    this.statusText = this.add.text(width / 2, height * 0.70, 'Clique sur Start pour jouer', {
+      fontFamily: 'Arial',
+      fontSize: '18px',
+      color: '#ffffff'
+    }).setOrigin(0.5);
+
+    this.errorText = this.add.text(width / 2, height * 0.94, '', {
+      fontFamily: 'Arial',
+      fontSize: '16px',
+      color: '#ff8080'
+    }).setOrigin(0.5);
+
+    // --- BOUTONS RECTANGLES (Start / Hit / Stand / Double) ---
+    const makeButtonRect = (x, y, w, h, label, onClick) => {
+      const container = this.add.container(x, y);
+      const rect = this.add.rectangle(0, 0, w, h, 0x0066cc, 0.9)
+        .setStrokeStyle(2, 0xffffff)
+        .setOrigin(0.5);
+      const txt = this.add.text(0, 0, label, {
+        fontFamily: 'Arial',
+        fontSize: '20px',
+        color: '#ffffff'
+      }).setOrigin(0.5);
+
+      container.add([rect, txt]);
+      container.setSize(w, h);
+      container.onClick = onClick;
+      return container;
+    };
+
+    const setButtonEnabled = (btn, enabled) => {
+      const rect = btn.list[0];
+      rect.setFillStyle(enabled ? 0x0066cc : 0x555555, 0.9);
+      if (enabled) {
+        btn.setInteractive({ useHandCursor: true })
+          .off('pointerup')
+          .on('pointerup', btn.onClick);
+      } else {
+        btn.disableInteractive();
+      }
+    };
+
+    // --- LOGIQUE DOUBLAGE ---
+    const canDouble = (state) =>
+      state &&
+      state.status === 'playing' &&
+      Array.isArray(state.player) &&
+      state.player.length === 2;
+
+    // --- FX BLACKJACK ---
+    this.blackjackEffectDone = false;
+    this.blackjackText = null;
+    this.blackjackFlash = null;
+
+    const resetBlackjackFx = () => {
+      this.blackjackEffectDone = false;
+      if (this.blackjackText) {
+        this.blackjackText.destroy();
+        this.blackjackText = null;
+      }
+      if (this.blackjackFlash) {
+        this.blackjackFlash.destroy();
+        this.blackjackFlash = null;
+      }
+      this.tweens.killTweensOf(this.pGroup);
+      this.pGroup.setScale(1);
+    };
+
+    const triggerBlackjackFx = () => {
+      if (this.blackjackEffectDone) return;
+      this.blackjackEffectDone = true;
+
+      // flash écran
+      this.blackjackFlash = this.add.rectangle(width / 2, height / 2, width, height, 0xffffff, 0.6)
+        .setDepth(20);
+      this.tweens.add({
+        targets: this.blackjackFlash,
+        alpha: 0,
+        duration: 250,
+        ease: 'Quad.easeOut',
+        onComplete: () => {
+          if (this.blackjackFlash) {
+            this.blackjackFlash.destroy();
+            this.blackjackFlash = null;
+          }
+        }
+      });
+
+      // texte BLACKJACK !
+      this.blackjackText = this.add.text(width / 2, playerY - height * 0.08, 'BLACKJACK !', {
+        fontFamily: 'Arial',
+        fontSize: '46px',
+        color: '#ffd94c',
+        stroke: '#000000',
+        strokeThickness: 4
+      }).setOrigin(0.5)
+        .setScale(0.1)
+        .setDepth(21);
+
+      this.tweens.add({
+        targets: this.blackjackText,
+        scale: 1.1,
+        duration: 450,
+        ease: 'Back.Out',
+        yoyo: true
+      });
+
+      // main du joueur qui "pulse"
+      this.tweens.add({
+        targets: this.pGroup,
+        scale: 1.1,
+        duration: 200,
+        ease: 'Sine.easeInOut',
+        yoyo: true,
+        repeat: 2
+      });
+
+      playSfx && playSfx(this, 'ui_click');
+    };
+
+    // --- TRACKING POUR L'ANIMATION ---
+    this.lastPlayer = [];
+    this.lastDealer = [];
+    this.animating = false;
+
+    // --- BOUTONS (références pour showState) ---
+    let startBtn, hitBtn, standBtn, doubleBtn;
+
+    // --- MAJ DES VALEURS ET DU STATUT (gère payout & blackjack) ---
+    const updateValuesAndStatus = (state, playerCards, dealerCards, payout) => {
+      const pVal = handValue(playerCards);
+      this.pValueText.setText(pVal ? String(pVal) : '');
+
+      const dVal = handValue(dealerCards);
+      this.dValueText.setText(dVal ? String(dVal) : '');
+
+      if (state.status === 'playing') {
+        this.statusText.setColor('#ffffff');
+        this.statusText.setText('À toi de jouer…');
+      } else {
+        const win = state.status === 'player_win' || state.status === 'dealer_bust';
+        const push = state.status === 'push';
+        this.statusText.setColor(win ? '#4cff7a' : push ? '#ffd24c' : '#ff7070');
+
+        let suffix = '';
+        if (typeof payout === 'number' && payout !== 0) {
+          const sign = payout > 0 ? '+' : '';
+          suffix = ` (${sign}${payout})`;
+        }
+        this.statusText.setText(`Résultat : ${state.status}${suffix}`);
+      }
+
+      // Détection blackjack gagnant : 21 en 2 cartes et victoire
+      const isBlackjackWin =
+        state.status !== 'playing' &&
+        Array.isArray(playerCards) &&
+        playerCards.length === 2 &&
+        handValue(playerCards) === 21 &&
+        (state.status === 'player_win' || state.status === 'dealer_bust');
+
+      if (isBlackjackWin) {
+        triggerBlackjackFx();
+      }
+
+      if (doubleBtn) {
+        setButtonEnabled(doubleBtn, this._playing && canDouble(state));
+      }
+    };
+
+    // --- FONCTION showState AVEC ANIMATION DEPUIS LE DECK ---
+    const showState = (state, payout) => {
+      const newP = state.player || [];
+      const newD = state.dealer || [];
+      const prevP = this.lastPlayer || [];
+      const prevD = this.lastDealer || [];
+
+      // On cherche où il y a UNE nouvelle carte (joueur ou croupier)
+      let target = null;
+
+      if (newP.length > prevP.length) {
+        target = { who: 'player', newCard: newP[newP.length - 1] };
+      } else if (newD.length > prevD.length) {
+        target = { who: 'dealer', newCard: newD[newD.length - 1] };
+      }
+
+      // 🧱 Cas où aucune nouvelle carte (juste statut / reveal déjà géré) :
+      if (!target) {
+        renderHand(newP, this.pGroup);
+        renderHand(newD, this.dGroup);
+        updateValuesAndStatus(state, newP, newD, payout);
+        this.lastPlayer = newP.slice();
+        this.lastDealer = newD.slice();
+        return;
+      }
+
+      // 🃏 Il y a une nouvelle carte -> anim depuis le deck + flip
+      this.animating = true;
+
+      // On affiche la main SANS la nouvelle carte (suspense)
+      const tmpPlayer = (target.who === 'player') ? newP.slice(0, -1) : newP.slice();
+      const tmpDealer = (target.who === 'dealer') ? newD.slice(0, -1) : newD.slice();
+
+      // Pendant l'anim, pas de payout final affiché
+      updateValuesAndStatus(state, tmpPlayer, tmpDealer, undefined);
+      renderHand(tmpPlayer, this.pGroup);
+      renderHand(tmpDealer, this.dGroup);
+
+      // Position finale de la nouvelle carte (dans le groupe)
+      const group = (target.who === 'player') ? this.pGroup : this.dGroup;
+      const finalHand = (target.who === 'player') ? newP : newD;
+      const n = finalHand.length;
+      const totalW = (n - 1) * this.cardGap;
+      const finalLocalX = -totalW / 2 + (n - 1) * this.cardGap;
+      const finalWorldX = group.x + finalLocalX;
+      const finalWorldY = group.y;
+
+      // Carte volante : DOS vers le haut
+      const flying = this.add.image(this.deckX, this.deckY - 10, 'BACK')
+        .setScale(this.cardScale)
+        .setDepth(10);
+
+      // 1) Animation depuis le deck jusqu'à la position finale
+      this.tweens.add({
+        targets: flying,
+        x: finalWorldX,
+        y: finalWorldY,
+        duration: 280,
+        ease: 'Cubic.easeOut',
+        onComplete: () => {
+          // 2) Flip : on "ferme" la carte (scaleX -> 0)
+          this.tweens.add({
+            targets: flying,
+            scaleX: 0,
+            duration: 120,
+            ease: 'Cubic.easeIn',
+            onComplete: () => {
+              // On met la vraie carte (AS, 9H, etc.)
+              flying.setTexture(target.newCard);
+
+              // 3) Flip inverse : on "réouvre" la carte (scaleX -> normal)
+              this.tweens.add({
+                targets: flying,
+                scaleX: this.cardScale,
+                duration: 120,
+                ease: 'Cubic.easeOut',
+                onComplete: () => {
+                  // On détruit la carte volante et on dessine la main "propre"
+                  flying.destroy();
+
+                  renderHand(newP, this.pGroup);
+                  renderHand(newD, this.dGroup);
+
+                  // Cette fois on applique le payout + blackjack éventuel
+                  updateValuesAndStatus(state, newP, newD, payout);
+
+                  // On mémorise l'état courant
+                  this.lastPlayer = newP.slice();
+                  this.lastDealer = newD.slice();
+
+                  this.animating = false;
+                }
+              });
+            }
+          });
+        }
+      });
+    };
+
+
+
+    // --- JETONS POUR LA MISE (hover textures) ---
+
+    const baseChipScale = 0.12;
+
+    const makeChip = (x, y, textureKey, hoverKey, value) => {
+      const img = this.add.image(x, y, textureKey)
+        .setOrigin(0.5)
+        .setScale(baseChipScale)
+        .setInteractive({ useHandCursor: true });
+
+      const baseY = y;
+
+      // HOVER : zoom léger + montée
+      img.on('pointerover', () => {
+        img.setTexture(hoverKey);
+        img.setScale(baseChipScale * 1.12);
+
+        this.tweens.add({
+          targets: img,
+          y: baseY - 8,
+          duration: 100,
+          ease: 'Sine.easeOut'
+        });
+      });
+
+      // SORTIE HOVER : retour normal
+      img.on('pointerout', () => {
+        img.setTexture(textureKey);
+        img.setScale(baseChipScale);
+
+        this.tweens.add({
+          targets: img,
+          y: baseY,
+          duration: 100,
+          ease: 'Sine.easeIn'
+        });
+      });
+
+      // CLICK : change la mise + petit pulse propre
+      img.on('pointerup', () => {
+        if (this._playing) return; // pas pendant une main
+
+        this.errorText.setText('');
+        this.bet = value;
+        this.betText.setText(`Mise : ${this.bet}`);
         playSfx?.(this, 'ui_click');
 
+        // mini animation de "pulse" (scale) sans bouger la position
+        this.tweens.add({
+          targets: img,
+          scale: baseChipScale * 1.18,
+          duration: 80,
+          ease: 'Sine.easeOut',
+          yoyo: true,
+          onComplete: () => {
+            img.setScale(baseChipScale * 1.12); // on revient au scale de hover
+          }
+        });
+      });
+
+      return img;
+    };
+
+
+
+
+    // positions des jetons : carré sous le deck (espacés)
+    const chipSpacingX = 145;
+    const chipSpacingY = 125;
+
+    const col1X = this.deckX - chipSpacingX / 2;
+    const col2X = this.deckX + chipSpacingX / 2;
+
+    const row1Y = this.deckY + 155;
+    const row2Y = row1Y + chipSpacingY;
+
+    makeChip(col1X, row1Y, 'chip5',    'chip5_hover',    5);
+    makeChip(col2X, row1Y, 'chip10',   'chip10_hover',   10);
+    makeChip(col1X, row2Y, 'chip25',   'chip25_hover',   25);
+    makeChip(col2X, row2Y, 'chip100',  'chip100_hover',  100);
+
+    // --- BOUTONS START / HIT / STAND / DOUBLE ---
+
+    startBtn = makeButtonRect(width * 0.26, height * 0.78, 90, 40, 'Start', async () => {
+      if (this.animating) return;
+      this.errorText.setText('');
+      const bet = this.bet | 0;
+      if (bet <= 0) {
+        this.errorText.setText('Mise invalide');
+        return;
+      }
+
+      resetBlackjackFx();
+
+      setButtonEnabled(startBtn, false);
+      setButtonEnabled(hitBtn, false);
+      setButtonEnabled(standBtn, false);
+      setButtonEnabled(doubleBtn, false);
+
+      try {
+        const res = await api('api/blackjack/start', { method: 'POST', body: { bet } });
+
+        this.lastPlayer = [];
+        this.lastDealer = [];
+
+        const status = res.state && res.state.status ? res.state.status : 'playing';
+        const payout = (typeof res.payout === 'number') ? res.payout : undefined;
+
+        // affiche les cartes + éventuel payout (blackjack direct)
+        showState(res.state, payout);
+
+        this.creditsText.setText(`Crédits : ${res.credits}`);
+
+        // MAJ HUD global (registry)
+        const user = this.registry.get('user') || {};
+        user.credits = res.credits;
+        this.registry.set('user', user);
+        this.game.events.emit('credits:update', res.credits);
+
+        if (status === 'playing') {
+          // partie normale : on laisse jouer
+          this._playing = true;
+          setButtonEnabled(startBtn, false);
+          setButtonEnabled(hitBtn, true);
+          setButtonEnabled(standBtn, true);
+        } else {
+          // blackjack instantané -> manche terminée
+          this._playing = false;
+          setButtonEnabled(startBtn, true);
+          setButtonEnabled(hitBtn, false);
+          setButtonEnabled(standBtn, false);
+          setButtonEnabled(doubleBtn, false);
+        }
       } catch (e) {
-        errEl.textContent = (e.status===401)?'Session expirée.':'Erreur serveur.'; errEl.classList.add('show');
-        if (e.status===401) this.scene.start('Login');
+        if (e.status === 409) this.errorText.setText('Crédits insuffisants.');
+        else if (e.status === 401) {
+          this.errorText.setText('Session expirée.');
+          this.scene.start('Login');
+          return;
+        } else this.errorText.setText('Erreur serveur.');
+        this._playing = false;
+        setButtonEnabled(startBtn, true);
       }
     });
+
+    hitBtn = makeButtonRect(width * 0.42, height * 0.78, 90, 40, 'Hit', async () => {
+      if (this.animating) return;
+      this.errorText.setText('');
+      setButtonEnabled(hitBtn, false);
+      setButtonEnabled(standBtn, false);
+      setButtonEnabled(doubleBtn, false);
+      try {
+        const res = await api('api/blackjack/hit', { method: 'POST' });
+        showState(res.state);
+        if (res.state.status !== 'playing') {
+          this._playing = false;
+          setButtonEnabled(startBtn, true);
+          playSfx && playSfx(this, 'ui_hover');
+        } else {
+          setButtonEnabled(hitBtn, true);
+          setButtonEnabled(standBtn, true);
+        }
+      } catch (e) {
+        this.errorText.setText(e.status === 401 ? 'Session expirée.' : 'Erreur serveur.');
+        if (e.status === 401) this.scene.start('Login');
+      }
+    });
+
+standBtn = makeButtonRect(width * 0.58, height * 0.78, 90, 40, 'Stand', async () => {
+  if (this.animating) return;
+  this.errorText.setText('');
+  setButtonEnabled(hitBtn, false);
+  setButtonEnabled(standBtn, false);
+  setButtonEnabled(doubleBtn, false);
+
+  try {
+    const res = await api('api/blackjack/stand', { method: 'POST' });
+
+    const finalState = res.state;
+    const payout = res.payout;
+    const finalCredits = res.credits;
+
+    // main du croupier AVANT stand (déjà connue sur le client)
+    const prevDealer = this.lastDealer || [];
+    // main complète du croupier APRÈS stand (renvoyée par le serveur)
+    const allDealer = finalState.dealer || [];
+    const extra = allDealer.length - prevDealer.length; // nb de nouvelles cartes
+
+    const applyEndOfRound = () => {
+      // MAJ crédits + HUD + boutons quand le croupier a fini de piocher
+      this.creditsText.setText(`Crédits : ${finalCredits}`);
+
+      this._playing = false;
+      setButtonEnabled(startBtn, true);
+
+      const user = this.registry.get('user') || {};
+      user.credits = finalCredits;
+      this.registry.set('user', user);
+      this.game.events.emit('credits:update', finalCredits);
+
+      playSfx && playSfx(this, 'ui_click');
+    };
+
+    // Si le croupier ne pioche pas ou ne pioche qu'une carte, on garde l'ancien comportement
+    if (extra <= 1) {
+      showState(finalState, payout);
+      applyEndOfRound();
+      return;
+    }
+
+    // Sinon : ANIMATION CARTE PAR CARTE 😏
+    const steps = [];
+    for (let i = 1; i <= extra; i++) {
+      // clone profond de l'état final
+      const s = JSON.parse(JSON.stringify(finalState));
+
+      // on ne garde que les premières cartes déjà connues + i nouvelles
+      s.dealer = allDealer.slice(0, prevDealer.length + i);
+
+      // tant qu'on n'a pas révélé la dernière carte,
+      // on garde status="playing" pour ne pas afficher le résultat/payout
+      if (i < extra) {
+        s.status = 'playing';
+      }
+
+      steps.push(s);
+    }
+
+    let idx = 0;
+    const playNext = () => {
+      const s = steps[idx];
+      const isLast = (idx === steps.length - 1);
+
+      // on n'affiche le payout que sur la DERNIÈRE carte
+      showState(s, isLast ? payout : undefined);
+
+      idx++;
+      if (idx < steps.length) {
+        // délai entre chaque tirage du croupier (ajuste 600 si tu veux plus/moins rapide)
+        this.time.delayedCall(800, playNext, null, this);
+      } else {
+        // fin de sequence : on applique crédits + boutons
+        applyEndOfRound();
+      }
+    };
+
+    // on démarre l'animation
+    playNext();
+
+  } catch (e) {
+    this.errorText.setText(e.status === 401 ? 'Session expirée.' : 'Erreur serveur.');
+    if (e.status === 401) this.scene.start('Login');
+  }
+});
+
+
+    doubleBtn = makeButtonRect(width * 0.74, height * 0.78, 90, 40, 'Double', async () => {
+      if (this.animating) return;
+      this.errorText.setText('');
+      setButtonEnabled(hitBtn, false);
+      setButtonEnabled(standBtn, false);
+      setButtonEnabled(doubleBtn, false);
+      try {
+        const res = await api('api/blackjack/double', { method: 'POST' });
+
+        showState(res.state, res.payout);
+
+        this.creditsText.setText(`Crédits : ${res.credits}`);
+
+        this._playing = false;
+        setButtonEnabled(startBtn, true);
+
+        const user = this.registry.get('user') || {};
+        user.credits = res.credits;
+        this.registry.set('user', user);
+        this.game.events.emit('credits:update', res.credits);
+
+        playSfx && playSfx(this, 'ui_click');
+      } catch (e) {
+        if (e.status === 409) {
+          this.errorText.setText('Crédits insuffisants pour doubler.');
+        } else if (e.status === 400) {
+          this.errorText.setText('Impossible de doubler maintenant.');
+        } else if (e.status === 401) {
+          this.errorText.setText('Session expirée.');
+          this.scene.start('Login');
+          return;
+        } else {
+          this.errorText.setText('Erreur serveur.');
+        }
+        if (this._playing) {
+          setButtonEnabled(hitBtn, true);
+          setButtonEnabled(standBtn, true);
+        } else {
+          setButtonEnabled(startBtn, true);
+        }
+      }
+    });
+
+    this._playing = false;
+    setButtonEnabled(startBtn, true);
+    setButtonEnabled(hitBtn, false);
+    setButtonEnabled(standBtn, false);
+    setButtonEnabled(doubleBtn, false);
   }
 
-  update(){ this.background.tilePositionX += 2; }
+  update() {
+    // pas d'animation du fond pour l'instant
+  }
 }
