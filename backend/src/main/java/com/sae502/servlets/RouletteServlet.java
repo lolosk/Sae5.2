@@ -230,23 +230,32 @@ public class RouletteServlet extends HttpServlet {
         for (UserDao.RouletteBet b : bets){
             int a = Math.max(0, b.amount);
             switch (b.type) {
-                case "STRAIGHT": if (b.param != null && n == b.param) total += a * 35; break;
+                case "STRAIGHT": if (b.param != null && n == b.param) total += a * 36; break; // 35:1 + mise = 36 * mise
                 case "DOZEN":
                     if (n==0) break;
                     int dozen = (n-1)/12 + 1; // 1..3
-                    if (b.param != null && b.param == dozen) total += a * 2;
+                    if (b.param != null && b.param == dozen) total += a * 3; // 2:1 + mise = 3 * mise
                     break;
                 case "COLUMN":
                     if (n==0) break;
                     int col = ((n-1) % 3) + 1; // 1..3
-                    if (b.param != null && b.param == col) total += a * 2;
+                    if (b.param != null && b.param == col) total += a * 3; // 2:1 + mise = 3 * mise
                     break;
-                case "RED":   if (!isGreen && isRed)   total += a; break;
-                case "BLACK": if (!isGreen && isBlack) total += a; break;
-                case "EVEN":  if (n!=0 && n%2==0)      total += a; break;
-                case "ODD":   if (n!=0 && n%2==1)      total += a; break;
-                case "LOW":   if (1 <= n && n <= 18)   total += a; break;
-                case "HIGH":  if (19 <= n && n <= 36)  total += a; break;
+                case "RED":   if (!isGreen && isRed)   total += a*2; break; // 1:1 + mise = 2 * mise
+                case "BLACK": if (!isGreen && isBlack) total += a*2; break; // 1:1 + mise = 2 * mise
+                case "EVEN":  if (n!=0 && n%2==0)      total += a*2; break; // 1:1 + mise = 2 * mise
+                case "ODD":   if (n!=0 && n%2==1)      total += a*2; break; // 1:1 + mise = 2 * mise
+                case "LOW":   if (1 <= n && n <= 18)   total += a*2; break; // 1:1 + mise = 2 * mise
+                case "HIGH":  if (19 <= n && n <= 36)  total += a*2; break; // 1:1 + mise = 2 * mise
+                /* CAS NON IMPLEMENTES CAR FAISANT APPEL AUX PARIS COMBINES QUI COMPLIQUENT BEAUCOUP
+                AVEC LE TEMPS RESTANT J'AI PREFRE LAISSER L'UTILISATEUR LE FAIRE LUI-MEME :
+                case "SPLIT": LE JOUEUR PARI SUR DEUX NOMBRES VOISINS (Vertical et horizontal)
+                    gain (17:1) + mise = 18 * mise
+                case "STREET": LE JOUEUR PARI SUR TROIS NOMBRES VOISINS (Vertical et horizontal en bordure)
+                    gain (11:1) + mise = 12 * mise
+                case "CORNER": LE JOUEUR PARI SUR QUATRES NOMBRES VOISINS (qui forment un carré 2 haut 2 bas)
+                    gain (8:1) + mise = 9 * mise
+                 */
             }
         }
         return total;

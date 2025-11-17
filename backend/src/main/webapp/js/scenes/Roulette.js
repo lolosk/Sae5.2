@@ -161,7 +161,7 @@ export class Roulette extends Phaser.Scene {
         c34.cy + c34.h / 2,
         c35.cy + c35.h / 2,
         c36.cy + c36.h / 2
-      ) + 18;
+      ) + 27;
 
       // Jeton rouge sous le 34 (miser moins)
       const small_chip = this._imageBtn(c34.cx, yBelow, 'RedChipsBtnchip', () => {
@@ -169,7 +169,7 @@ export class Roulette extends Phaser.Scene {
         this._setStatus();
         this._toast(`Bet − : ${this.betUnit}`);
       });
-      if (small_chip) small_chip.setScale(0.03).setDepth(60);
+      if (small_chip) small_chip.setScale(0.045).setDepth(60);
 
       // Bouton CLEAR sous le 35
       const clearBtn = this._imageBtn(c35.cx, yBelow, 'clearBtn', () => {
@@ -179,7 +179,7 @@ export class Roulette extends Phaser.Scene {
         // On lance le nettoyage des mises (asynchrone, mais on ne l’attend pas ici)
         this._clearBets().catch(()=>{});
       });
-      if (clearBtn) clearBtn.setScale(0.55).setDepth(60);
+      if (clearBtn) clearBtn.setScale(0.6).setDepth(60);
 
       // Jeton vert sous le 36 (miser plus)
       const big_chip = this._imageBtn(c36.cx, yBelow, 'GreenChipsBtn', () => {
@@ -187,7 +187,7 @@ export class Roulette extends Phaser.Scene {
         this._setStatus();
         this._toast(`Bet + : ${this.betUnit}`);
       });
-      if (big_chip) big_chip.setScale(0.03).setDepth(60);
+      if (big_chip) big_chip.setScale(0.045).setDepth(60);
     };
 
     // On essaie d'ajouter les boutons immédiatement puis une fois la grille finalisée
