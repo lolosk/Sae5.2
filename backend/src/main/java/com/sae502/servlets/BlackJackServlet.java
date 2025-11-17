@@ -9,7 +9,13 @@ import java.io.IOException;
 import java.sql.SQLException;
 import java.util.*;
 
-@WebServlet(urlPatterns = {"/api/blackjack/start", "/api/blackjack/hit", "/api/blackjack/stand"})
+@WebServlet(urlPatterns = {
+        "/api/blackjack/start",
+        "/api/blackjack/hit",
+        "/api/blackjack/stand",
+        "/api/blackjack/double"
+})
+
 public class BlackJackServlet extends HttpServlet {
     private final Gson gson = new Gson();
 
@@ -41,6 +47,7 @@ public class BlackJackServlet extends HttpServlet {
                 case "/api/blackjack/start": handleStart(req, resp, s, username); break;
                 case "/api/blackjack/hit":   handleHit(resp, s, username); break;
                 case "/api/blackjack/stand": handleStand(resp, s, username); break;
+                case "/api/blackjack/double": handleDouble(resp, s, username); break;
                 default:
                     resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
                     resp.getWriter().write("{\"ok\":false}");
@@ -52,31 +59,18 @@ public class BlackJackServlet extends HttpServlet {
         }
     }
 
-    private void handleStart(HttpServletRequest req, HttpServletResponse resp, HttpSession session, String username) throws IOException, SQLException {
-        // bloque si partie en cours
-        BJState existing = (BJState) session.getAttribute("bjState");
-        if (existing != null && !existing.finished) {
-            resp.setStatus(HttpServletResponse.SC_CONFLICT);
-            resp.getWriter().write("{\"ok\":false,\"error\":\"game_in_progress\"}");
-            return;
-        }
+    private void handleStart(HttpServletRequest req, HttpServletResponse resp,
+                             HttpSession session, String username)
+            throws IOException, SQLException {
 
-        // lire le bet de façon robuste
-        int bet;
-        JsonObject body;
+        // lire bet
+        int bet = 0;
         try (BufferedReader r = req.getReader()) {
-            body = gson.fromJson(r, JsonObject.class);
-        }
-        if (body == null || !body.has("bet") || !body.get("bet").isJsonPrimitive()) {
-            resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-            resp.getWriter().write("{\"ok\":false,\"error\":\"invalid_json\"}");
-            return;
-        }
-        try {
+            JsonObject body = gson.fromJson(r, JsonObject.class);
             bet = body.get("bet").getAsInt();
         } catch (Exception e) {
             resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-            resp.getWriter().write("{\"ok\":false,\"error\":\"invalid_bet\"}");
+            resp.getWriter().write("{\"ok\":false,\"error\":\"invalid_json\"}");
             return;
         }
         if (bet <= 0) {
@@ -114,16 +108,51 @@ public class BlackJackServlet extends HttpServlet {
         st.player.add(draw(st.deck));
         st.dealer.add(draw(st.deck));
 
+        int payout = 0;
+        boolean immediateEnd = false;
+
+        // valeur de la main du joueur
+        int pVal = handValue(st.player);
+        boolean playerBJ = (pVal == 21 && st.player.size() == 2);
+
+        // RÈGLE : si le JOUEUR a blackjack -> victoire immédiate,
+        // peu importe les cartes du croupier.
+        if (playerBJ) {
+            immediateEnd = true;
+            st.finished = true;
+            st.status = "player_win";
+
+            // payout 1:1
+            payout = st.bet * 2;
+
+            credits += payout;
+            session.setAttribute("credits", credits);
+
+            UserDao.UserRow uRow = UserDao.getByUsername(username);
+            if (uRow != null) {
+                UserDao.updateCredits(uRow.id, credits);
+                logGame(username, st, payout);
+            }
+        }
+        // si le joueur n'a PAS blackjack : rien de spécial,
+        // status reste "playing", finished = false, le croupier
+        // jouera plus tard dans handleStand.
+
         session.setAttribute("bjState", st);
 
         JsonObject out = new JsonObject();
         out.addProperty("ok", true);
-        JsonObject stateJson = stateToJson(st, false);
-        stateJson.addProperty("playerValue", handValue(st.player));
-        out.add("state", stateJson);
+        // si manche finie (blackjack joueur), on peut révéler le croupier
+        out.add("state", stateToJson(st, immediateEnd));
         out.addProperty("credits", credits);
+        if (immediateEnd) {
+            out.addProperty("payout", payout);
+        }
+
         resp.getWriter().write(out.toString());
     }
+
+
 
 
     private void handleHit(HttpServletResponse resp, HttpSession session, String username) throws IOException, SQLException {
@@ -150,6 +179,96 @@ public class BlackJackServlet extends HttpServlet {
         out.addProperty("credits", credits);
         resp.getWriter().write(out.toString());
     }
+    private void handleDouble(HttpServletResponse resp, HttpSession session, String username) throws IOException, SQLException {
+        BJState st = (BJState) session.getAttribute("bjState");
+        if (st == null || st.finished) {
+            resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            resp.getWriter().write("{\"ok\":false,\"error\":\"no_game\"}");
+            return;
+        }
+
+        // on ne peut doubler qu'avec 2 cartes
+        if (st.player.size() != 2) {
+            resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            resp.getWriter().write("{\"ok\":false,\"error\":\"cannot_double_now\"}");
+            return;
+        }
+
+        // vérifier crédits en session
+        Integer creditsObj = (Integer) session.getAttribute("credits");
+        int credits = (creditsObj != null) ? creditsObj : 0;
+
+        // il faut payer une mise supplémentaire égale à la mise de départ
+        if (credits < st.bet) {
+            resp.setStatus(HttpServletResponse.SC_CONFLICT);
+            resp.getWriter().write("{\"ok\":false,\"error\":\"insufficient_credits\"}");
+            return;
+        }
+
+        // débiter la 2e mise
+        credits -= st.bet;
+        session.setAttribute("credits", credits);
+
+        // la mise totale devient 2x
+        st.bet = st.bet * 2;
+
+        // le joueur reçoit UNE seule carte
+        st.player.add(draw(st.deck));
+        int pVal = handValue(st.player);
+
+        int payout = 0;
+
+        if (pVal > 21) {
+            // le joueur bust direct
+            st.status = "player_bust";
+            st.finished = true;
+            // pas de payout
+            logGame(username, st, 0);
+
+        } else {
+            // sinon le dealer joue comme dans un stand
+            while (handValue(st.dealer) < 17) {
+                st.dealer.add(draw(st.deck));
+            }
+
+            int dVal = handValue(st.dealer);
+
+            if (dVal > 21) {
+                st.status = "dealer_bust";
+                payout = st.bet * 2;   // on avait déjà débité 2x la mise
+            } else if (pVal > dVal) {
+                st.status = "player_win";
+                payout = st.bet * 2;
+            } else if (pVal < dVal) {
+                st.status = "dealer_win";
+                payout = 0;
+            } else {
+                st.status = "push";
+                payout = st.bet;
+            }
+
+            st.finished = true;
+
+            // créditer ce qu'il faut
+            credits += payout;
+            session.setAttribute("credits", credits);
+
+            // DB
+            UserDao.UserRow uRow = UserDao.getByUsername(username);
+            if (uRow != null) {
+                UserDao.updateCredits(uRow.id, credits);
+                logGame(username, st, payout);
+            }
+        }
+
+        JsonObject out = new JsonObject();
+        out.addProperty("ok", true);
+        out.add("state", stateToJson(st, true));
+        out.addProperty("payout", payout);
+        out.addProperty("credits", credits);
+        resp.getWriter().write(out.toString());
+    }
+
 
     private void handleStand(HttpServletResponse resp, HttpSession session, String username) throws IOException, SQLException {
         BJState st = (BJState) session.getAttribute("bjState");
