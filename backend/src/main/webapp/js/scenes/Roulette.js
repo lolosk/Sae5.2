@@ -42,6 +42,8 @@ export class Roulette extends Phaser.Scene {
     L('panel',             'assets/roulette/panel.png');
   }
 
+
+// CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE
   /**
    * Point d'entrée de la scène.
    * Installe tout ce qui est visible à l'écran :
@@ -83,22 +85,27 @@ export class Roulette extends Phaser.Scene {
     this.lastTxt    = this.add.text(16, 40, 'Dernier: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
 
     // Petit texte explicatif pour les boutons de jetons
-    this.BetTxt    = this.add.text(16, 700, '*Jeton vert (réduire mise), jeton rouge (augmenter mise)', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
+    this.BetTxt    = this.add.text(16, 700, '*Jeton vert (augmenter mise), jeton rouge (réduire mise)', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
 
     // Création de la roue et de son curseur à droite de l'écran
     this._buildWheel(W, H);
 
-    // Mise en place du panneau récapitulatif des mises
-    const panelW = Math.min(360, W*0.32), panelH = Math.min(240, H*0.35);
-    const panelX = W - panelW/2 - 16, panelY = 16 + panelH/2;
+    // === Panneau récap (position fixe) ===
+    const panelW = 300, panelH = 420;     // taille fixe
+    const panelX = 200,  panelY = 390;    // ↩ change juste ces 2 nombres pour déplacer
+
+    let panelBg;
     if (this.textures.exists('panel')) {
-      this.add.image(panelX, panelY, 'panel').setDisplaySize(panelW, panelH).setAlpha(0.9).setDepth(30);
+      panelBg = this.add.image(panelX, panelY, 'panel')
+        .setDisplaySize(panelW, panelH).setAlpha(0.9).setDepth(30);
     } else {
-      this.add.rectangle(panelX, panelY, panelW, panelH, 0x0f1e2f, 0.8).setStrokeStyle(1, 0x6fb1ff).setDepth(30);
+      panelBg = this.add.rectangle(panelX, panelY, panelW, panelH, 0x0f1e2f, 0.8)
+        .setStrokeStyle(1, 0x6fb1ff).setDepth(30);
     }
     this.betsTxt = this.add.text(panelX - panelW/2 + 12, panelY - panelH/2 + 10, 'Aucune mise.', {
       fontFamily:'monospace', fontSize:14, color:'#e6f1ff', wordWrap:{ width: panelW-24 }
     }).setDepth(31);
+
 
     // Bouton "Spin" : lance un tirage de roulette via le backend
     if (this.wheel) {
@@ -288,11 +295,16 @@ export class Roulette extends Phaser.Scene {
   _buildWheel(W,H){
     const rightMargin = 16;
     const wheelAreaW = Math.min(W*0.42, W*0.5);
-    const maxSize = Math.min(wheelAreaW, H*0.62);
-    const wheelX = W - rightMargin - maxSize/2;
-    const wheelY = Math.max(H*0.48, 220);
+    const maxSize     = Math.min(wheelAreaW, H*0.62);
+
+    // ➜ décalage supplémentaire vers la gauche
+    const offsetLeft = 80; // augmente cette valeur pour pousser encore plus à gauche
+
+    const wheelX = W - rightMargin - maxSize/2 - offsetLeft;
+    const wheelY = Math.max(H*0.45, 220);
 
     this.wheelGroup = this.add.container(wheelX, wheelY);
+
 
     // Image principale de la roue qui sera animée lors du tirage
     this.wheel = null;
@@ -334,6 +346,88 @@ export class Roulette extends Phaser.Scene {
       this.wheelGroup.add(cursor);
     }
   }
+
+      /**
+       * Mapping de la roue (roulette européenne, 0 en haut).
+       * On part de 0 en haut puis on tourne DANS LE SENS HORAIRE (vers la droite).
+       * 32 est donc juste à droite de 0 et 26 juste à gauche.
+       */
+      _initWheelMapping(){
+        if (this._wheelOrder) return;
+
+        // Ordre complet en tournant dans le sens horaire à partir de 0
+        this._wheelOrder = [
+          0,
+          32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23,
+          10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26
+        ];
+
+        // 37 cases -> angle d'un secteur
+        this._sectorAngle = 360 / this._wheelOrder.length; // ≈ 9.7297°
+
+        // Si jamais le curseur n’est pas pile sur le centre de la case,
+        // tu pourras jouer sur cette valeur (0 au début, on ajuste ensuite).
+        this._pointerOffsetDeg = 0;
+      }
+
+
+      /**
+       * Calcule l'angle final de la roue pour qu'un numéro donné soit sous le curseur.
+       * @param {number} num Numéro gagnant (0..36)
+       * @returns {number} angle absolu cible en degrés
+       */
+      _angleForNumber(num){
+        if (!this.wheel) return 0;
+
+        this._initWheelMapping();
+
+        const n = Number(num);
+        const idx = this._wheelOrder.indexOf(n);
+        if (idx === -1){
+          // Si le numéro est invalide on fait juste 2 tours de plus
+          return this.wheel.angle + 720;
+        }
+
+        // Orientation de base : 0 en haut quand angle = 0.
+        // Pour mettre l’index idx sous le curseur (en haut),
+        // on veut une rotation de -idx * secteurAngle (sens anti-horaire),
+        // plus un éventuel décalage global du curseur.
+        const baseAngle = -idx * this._sectorAngle + this._pointerOffsetDeg;
+
+        const current = this.wheel.angle;
+        let target = baseAngle;
+
+        // On ajoute des tours complets pour toujours avoir au moins 2 tours
+        while (target <= current + 720){
+          target += 360;
+        }
+        return target;
+      }
+
+
+      /**
+       * Anime la roue pour qu'elle s'arrête sur un numéro donné.
+       * @param {number} num Numéro gagnant
+       * @param {number} [duration=2000] Durée de l'anim en ms
+       * @returns {Promise<void>}
+       */
+      _spinWheelToNumber(num, duration = 2000){
+        if (!this.wheel) return Promise.resolve();
+
+        const targetAngle = this._angleForNumber(num);
+
+        return new Promise(resolve=>{
+          this.tweens.add({
+            targets: this.wheel,
+            angle:   targetAngle,
+            duration,
+            ease: 'Cubic.Out',
+            onComplete: resolve
+          });
+        });
+      }
+
+
 
   /**
    * Crée un bouton rectangulaire simple avec un label centré.
@@ -689,56 +783,69 @@ export class Roulette extends Phaser.Scene {
     }
   }
 
-  /**
-   * Lance un tour de roulette :
-   * - démarre l'animation de la roue,
-   * - interroge l'API pour connaître le résultat,
-   * - met à jour solde, dernier tirage et affichage des mises.
-   */
-  async _doSpin(){
-    if (this._spinning) return;
-    this._spinning = true;
-    this._setStatus('Spinning...');
+    /**
+     * Lance un tour de roulette synchronisé :
+     * - appelle l’API qui renvoie le numéro gagnant,
+     * - anime la roue pour que ce numéro arrive sous le curseur,
+     * - met à jour solde, mises, dernier tirage.
+     */
+      async _doSpin(){
+        if (this._spinning) return;
+        this._spinning = true;
+        this._setStatus('Spinning...');
 
-    // Animation de la roue : on lui ajoute deux tours complets + un angle aléatoire
-    const tweenPromise = this.wheel ? new Promise(res=>{
-      const extra = Phaser.Math.Between(0, 359);
-      this.tweens.add({
-        targets: this.wheel,
-        angle: this.wheel.angle + 720 + extra,
-        duration: 1600,
-        ease: 'Cubic.Out',
-        onComplete: res
-      });
-    }) : Promise.resolve();
+        try {
+          // 1) Appel backend
+          const r = await api('api/roulette/spin', { method:'POST' });
 
-    try{
-      const r = await api('api/roulette/spin', { method:'POST' });
-      await tweenPromise;
+          const resultNumber = (r.result && typeof r.result.number !== 'undefined')
+            ? Number(r.result.number)
+            : Phaser.Math.Between(0,36);
 
-      if (r.result){
-        const { number, color } = r.result;
-        this.lastTxt.setText(`Dernier: ${number} (${String(color).toUpperCase()})`);
+          // 2) Animation de la roue jusqu'au bon numéro
+          await this._spinWheelToNumber(resultNumber, 2000);
+
+          // 3) MAJ affichage (dernier tirage, solde, mises...)
+          if (r.result){
+            const { number, color } = r.result;
+            this.lastTxt.setText(`Dernier: ${number} (${String(color).toUpperCase()})`);
+          }
+
+          if (r.balance != null){
+            this.balanceTxt.setText('Solde: ' + this._euro(r.balance));
+            this.game.events.emit('credits:update', r.balance);
+          }
+
+          this.localBets = [];
+          this._renderBets();
+          this._clearChips();
+
+          if (r.gain && Number(r.gain) > 0){
+            this._flashWin();
+            this._setStatus(`WIN +${this._euro(r.gain)}`);
+          } else {
+            this._setStatus('No win');
+          }
+
+        } catch(e){
+          // Fallback offline : on garde la synchro roue ↔ numéro
+          const n = Phaser.Math.Between(0,36);
+          await this._spinWheelToNumber(n, 2000);
+
+          const reds = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
+          const color = (n===0) ? 'GREEN' : (reds.has(n)?'RED':'BLACK');
+          this.lastTxt.setText(`Dernier: ${n} (${color})`);
+
+          this.localBets = [];
+          this._renderBets();
+          this._clearChips();
+          this._setStatus('No win (offline)');
+        }
+
+        this._spinning = false;
       }
-      if (r.balance!=null) this.balanceTxt.setText('Solde: ' + this._euro(r.balance));
-      this.localBets = []; this._renderBets();
-      this._clearChips();
-      if (r.gain && Number(r.gain)>0){ this._flashWin(); this._setStatus(`WIN +${this._euro(r.gain)}`); }
-      else { this._setStatus('No win'); }
-      this.game.events.emit('credits:update', r.balance);
-    } catch(e){
-      // Mode dégradé sans serveur : tirage local pour garder un comportement jouable
-      const n = Phaser.Math.Between(0,36);
-      const reds = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
-      const color = (n===0) ? 'green' : (reds.has(n)?'red':'black');
-      await tweenPromise;
-      this.lastTxt.setText(`Dernier: ${n} (${color.toUpperCase()})`);
-      this.localBets = []; this._renderBets();
-      this._clearChips();
-      this._setStatus('No win (offline)');
-    }
-    this._spinning = false;
-  }
+
+
 
   /**
    * Ajoute une mise pleine (numéro unique).
