@@ -11,7 +11,7 @@ public class DatabaseConnection {
     );
     */
     // Windows :
-    private static final Path DB_PATH = Path.of("C:/Users/Vincent/IdeaProjects/Sae5.2/database/casino.db");
+    private static final Path DB_PATH = Path.of("C:/Users/lolo5/IdeaProjects/Sae5.2/database/casino.db");
 
     private static final String URL = "jdbc:sqlite:" + DB_PATH;
 

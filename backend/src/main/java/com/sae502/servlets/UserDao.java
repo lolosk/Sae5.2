@@ -80,6 +80,158 @@ public class UserDao {
         }
     }
 
+
+
+
+    // ==== Roulette (stockage des mises) =========================================
+    public static class RouletteBet {
+        public final String type;     // STRAIGHT / DOZEN / COLUMN / RED / BLACK / EVEN / ODD / LOW / HIGH
+        public final int amount;      // crédits engagés
+        public final Integer param;   // STRAIGHT: 0..36, DOZEN:1..3, COLUMN:1..3, autres: null
+        public RouletteBet(String type, int amount, Integer param){
+            this.type = type; this.amount = amount; this.param = param;
+        }
+    }
+
+    /** Liste les mises en cours d’un joueur (ordre d’insertion). */
+    public static java.util.List<RouletteBet> rouletteListBets(int userId) throws java.sql.SQLException {
+        try (java.sql.Connection c = DatabaseConnection.getConnection();
+             java.sql.PreparedStatement ps = c.prepareStatement(
+                     "SELECT type, amount, param FROM roulette_bets WHERE user_id=? ORDER BY id ASC")) {
+            ps.setInt(1, userId);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                java.util.List<RouletteBet> out = new java.util.ArrayList<>();
+                while (rs.next()) {
+                    out.add(new RouletteBet(
+                            rs.getString(1),
+                            rs.getInt(2),
+                            (Integer) rs.getObject(3)
+                    ));
+                }
+                return out;
+            }
+        }
+    }
+
+    /** Ajoute UNE mise. (Le débit des crédits se fait côté servlet avant cet appel.) */
+    public static void rouletteAddBet(int userId, String type, int amount, Integer param) throws java.sql.SQLException {
+        try (java.sql.Connection c = DatabaseConnection.getConnection();
+             java.sql.PreparedStatement ps = c.prepareStatement(
+                     "INSERT INTO roulette_bets(user_id,type,amount,param,created_at) " +
+                             "VALUES(?,?,?,?,CURRENT_TIMESTAMP)")) {
+            ps.setInt(1, userId);
+            ps.setString(2, type);
+            ps.setInt(3, amount);
+            if (param == null) ps.setNull(4, java.sql.Types.INTEGER);
+            else               ps.setInt(4, param);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Supprime toutes les mises du joueur et renvoie le total à rembourser (somme des amounts). */
+    public static int rouletteClearAndRefundTotal(int userId) throws java.sql.SQLException {
+        try (java.sql.Connection c = DatabaseConnection.getConnection()) {
+            c.setAutoCommit(false);
+            int total = 0;
+            try (java.sql.PreparedStatement ps = c.prepareStatement(
+                    "SELECT COALESCE(SUM(amount),0) FROM roulette_bets WHERE user_id=?")) {
+                ps.setInt(1, userId);
+                try (java.sql.ResultSet rs = ps.executeQuery()) { if (rs.next()) total = rs.getInt(1); }
+            }
+            try (java.sql.PreparedStatement del = c.prepareStatement(
+                    "DELETE FROM roulette_bets WHERE user_id=?")) {
+                del.setInt(1, userId);
+                del.executeUpdate();
+            }
+            c.commit();
+            return total;
+        }
+    }
+
+
+
+
+
+    // --- AJOUTER DANS LA CLASSE UserDao ---
+
+    /** Met à jour les crédits d'un utilisateur. */
+    public static void updateCredits(int userId, int newCredits) throws SQLException {
+        final String sql = "UPDATE users SET credits = ? WHERE id = ?";
+        try (Connection cn = DatabaseConnection.getConnection();
+             PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setInt(1, newCredits);
+            ps.setInt(2, userId);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Insère une ligne d'historique dans la table games.
+     *  resultJson est un JSON (stocké en TEXT sous SQLite).
+     */
+    public static void insertGameLog(int userId, String gameType, int bet, String resultJson) throws SQLException {
+        final String sql = "INSERT INTO games(user_id, game_type, bet, result, created_at) " +
+                "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)";
+        try (Connection cn = DatabaseConnection.getConnection();
+             PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setInt(1, userId);
+            ps.setString(2, gameType);
+            ps.setInt(3, bet);
+            ps.setString(4, resultJson);
+            ps.executeUpdate();
+        }
+    }
+
+
+    // Renvoie le nouveau solde si le débit passe, sinon null (fonds insuffisants)
+    public static Integer debitCreditsIfEnough(int userId, int amount) throws SQLException {
+        if (amount <= 0) return getCredits(userId);
+        try (Connection c = DatabaseConnection.getConnection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement up = c.prepareStatement(
+                    "UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?")) {
+                up.setInt(1, amount);
+                up.setInt(2, userId);
+                up.setInt(3, amount);
+                int updated = up.executeUpdate();
+                if (updated == 0) { c.rollback(); return null; } // pas assez de crédits
+            }
+            int credits = getCreditsTx(c, userId);
+            c.commit();
+            return credits;
+        }
+    }
+
+    public static int addCredits(int userId, int amount) throws SQLException {
+        if (amount <= 0) return getCredits(userId);
+        try (Connection c = DatabaseConnection.getConnection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement up = c.prepareStatement(
+                    "UPDATE users SET credits = credits + ? WHERE id = ?")) {
+                up.setInt(1, amount);
+                up.setInt(2, userId);
+                up.executeUpdate();
+            }
+            int credits = getCreditsTx(c, userId);
+            c.commit();
+            return credits;
+        }
+    }
+
+    // Helpers
+    private static int getCreditsTx(Connection c, int userId) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("SELECT credits FROM users WHERE id = ?")) {
+            ps.setInt(1, userId);
+            try (ResultSet rs = ps.executeQuery()) { rs.next(); return rs.getInt(1); }
+        }
+    }
+
+    public static int getCredits(int userId) throws SQLException {
+        try (Connection c = DatabaseConnection.getConnection()) { return getCreditsTx(c, userId); }
+    }
+
+
+
+
     // Petit DTO interne
     public static class UserRow {
         public int id;

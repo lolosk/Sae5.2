@@ -1,180 +1,254 @@
 package com.sae502.servlets;
 
-import jakarta.servlet.ServletException;
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.sae502.servlets.UserDao;
+
 import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.security.SecureRandom;
 import java.util.*;
 
-
-@WebServlet(name = "RouletteServlet", urlPatterns = {"/roulette"})
+@WebServlet(urlPatterns = "/api/roulette/*")
 public class RouletteServlet extends HttpServlet {
 
-    enum Color { RED, BLACK, GREEN }
+    private final Gson gson = new Gson();
+    // numéros rouges (roulette EU)
+    private static final Set<Integer> REDS = new HashSet<>(Arrays.asList(
+            1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36
+    ));
+    private final Random rng = new Random();
 
-    private static final Set<Integer> REDS = Set.of(
-            1,3,5,7,9,12,14,16,18,21,23,25,27,30,32,34,36
-    );
+    // ========= Helpers communs =========
 
-    private static Color colorOf(int number) {
-        if (number == 0) return Color.GREEN;
-        return REDS.contains(number) ? Color.RED : Color.BLACK;
-    }
+    private Integer requireUserId(HttpServletRequest req) throws Exception {
+        HttpSession s = req.getSession(false);
+        if (s == null) throw new Exception("unauth");
+        Integer uid = (Integer) s.getAttribute("userId");
+        if (uid != null) return uid;
 
-    enum BetType {
-        STRAIGHT(35),
-        RED(1), BLACK(1),
-        EVEN(1), ODD(1),
-        LOW(1), HIGH(1),
-        DOZEN(2), COLUMN(2);
-
-        final int payout;
-        BetType(int payout) { this.payout = payout; }
-    }
-
-    static final class Bet {
-        final BetType type;
-        final BigDecimal amount;
-        final Integer param;
-
-        Bet(BetType type, BigDecimal amount, Integer param) {
-            this.type = type;
-            this.amount = amount;
-            this.param = param;
-        }
-
-        boolean wins(int number, Color color) {
-            switch (type) {
-                case STRAIGHT: return Objects.equals(param, number);
-                case RED: return color == Color.RED;
-                case BLACK: return color == Color.BLACK;
-                case EVEN: return number != 0 && number % 2 == 0;
-                case ODD: return number % 2 == 1;
-                case LOW: return number >= 1 && number <= 18;
-                case HIGH: return number >= 19 && number <= 36;
-                case DOZEN:
-                    if (param == 1) return number >= 1 && number <= 12;
-                    if (param == 2) return number >= 13 && number <= 24;
-                    if (param == 3) return number >= 25 && number <= 36;
-                    return false;
-                case COLUMN:
-                    if (number == 0) return false;
-                    int col = ((number - 1) % 3) + 1;
-                    return Objects.equals(param, col);
-                default: return false;
+        // fallback si ta session stocke le username dans "user"
+        Object u = s.getAttribute("user");
+        if (u instanceof String) {
+            UserDao.UserRow row = UserDao.getByUsername((String) u);
+            if (row != null) {
+                s.setAttribute("userId", row.id);
+                s.setAttribute("credits", row.credits);
+                return row.id;
             }
         }
-
-        BigDecimal winAmount() {
-            return amount.multiply(BigDecimal.valueOf(type.payout));
-        }
+        throw new Exception("unauth");
     }
 
-    // === Variables de jeu ===
-    private final SecureRandom rng = new SecureRandom();
-    private BigDecimal balance = new BigDecimal("1000.00");
-    private final List<Bet> currentBets = new ArrayList<>();
+    private JsonObject readJson(HttpServletRequest req) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader r = req.getReader()) { String line; while ((line = r.readLine()) != null) sb.append(line); }
+        String s = sb.toString().trim();
+        return s.isEmpty() ? new JsonObject() : gson.fromJson(s, JsonObject.class);
+    }
+
+    private void writeJson(HttpServletResponse resp, int status, JsonObject obj) throws IOException {
+        resp.setStatus(status);
+        resp.setCharacterEncoding("UTF-8");
+        resp.setContentType("application/json; charset=UTF-8");
+        try (PrintWriter w = resp.getWriter()) { w.write(gson.toJson(obj)); }
+    }
+
+    private JsonObject err(String code, String detail){
+        JsonObject o = new JsonObject();
+        o.addProperty("error", code);
+        if (detail != null) o.addProperty("detail", detail);
+        return o;
+    }
+
+    private String safeMsg(Throwable e){ String m = e.getMessage(); return (m==null)?e.getClass().getSimpleName():m.replace("\"","'"); }
+
+    private int jInt(JsonObject o, String k, int def){ return (o!=null && o.has(k) && o.get(k).isJsonPrimitive()) ? o.get(k).getAsInt() : def; }
+    private String jStr(JsonObject o, String k, String def){ return (o!=null && o.has(k) && o.get(k).isJsonPrimitive()) ? o.get(k).getAsString() : def; }
+    private Integer jOptInt(JsonObject o, String k){ return (o!=null && o.has(k) && o.get(k).isJsonPrimitive()) ? o.get(k).getAsInt() : null; }
+
+    private JsonArray toJsonBets(java.util.List<UserDao.RouletteBet> bets){
+        JsonArray a = new JsonArray();
+        for (UserDao.RouletteBet b : bets){
+            JsonObject o = new JsonObject();
+            o.addProperty("type", b.type);
+            o.addProperty("amount", b.amount);
+            if (b.param != null) o.addProperty("param", b.param);
+            a.add(o);
+        }
+        return a;
+    }
+
+    // ========= GET =========
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
-        resp.setContentType("text/plain; charset=UTF-8");
-        try (PrintWriter out = resp.getWriter()) {
-            out.println("=== État de la roulette ===");
-            out.println("Solde : " + balance + " €");
-            out.println("Mises en cours : " + currentBets.size());
+        String path = req.getPathInfo();
+        try {
+            Integer uid = requireUserId(req);
+            if ("/state".equals(path)) {
+                int balance = UserDao.getCredits(uid);
+                java.util.List<UserDao.RouletteBet> bets = UserDao.rouletteListBets(uid);
+
+                // dernier résultat (en session)
+                HttpSession s = req.getSession();
+                Integer lastNum = (Integer) s.getAttribute("roulette_last_num");
+                String  lastCol = (String)  s.getAttribute("roulette_last_col");
+
+                JsonObject out = new JsonObject();
+                out.addProperty("balance", balance);
+                out.add("bets", toJsonBets(bets));
+                if (lastNum != null && lastCol != null) {
+                    JsonObject lr = new JsonObject();
+                    lr.addProperty("number", lastNum);
+                    lr.addProperty("color", lastCol);
+                    out.add("lastResult", lr);
+                }
+                writeJson(resp, 200, out);
+                return;
+            }
+            writeJson(resp, 404, err("unknown_path", path));
+        } catch (Throwable e){
+            writeJson(resp, 500, err("server_error", safeMsg(e)));
         }
     }
+
+    // ========= DELETE (/bets) =========
+
+    @Override
+    protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String path = req.getPathInfo();
+        try {
+            Integer uid = requireUserId(req);
+            if ("/bets".equals(path)) {
+                int refund = UserDao.rouletteClearAndRefundTotal(uid);
+                int balance = (refund > 0) ? UserDao.addCredits(uid, refund) : UserDao.getCredits(uid);
+                req.getSession().setAttribute("credits", balance);
+
+                JsonObject out = new JsonObject();
+                out.addProperty("ok", true);
+                out.addProperty("balance", balance);
+                writeJson(resp, 200, out);
+                return;
+            }
+            writeJson(resp, 404, err("unknown_path", path));
+        } catch (Throwable e){
+            writeJson(resp, 500, err("server_error", safeMsg(e)));
+        }
+    }
+
+    // ========= POST =========
 
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
-        String action = req.getParameter("action");
-        resp.setContentType("text/plain; charset=UTF-8");
-
-        try (PrintWriter out = resp.getWriter()) {
-            if (action == null) {
-                out.println("Erreur : paramètre 'action' manquant (bet, spin, clear).");
-                return;
-            }
-
-            switch (action) {
-                case "bet":
-                    handleBet(req, out);
-                    break;
-                case "spin":
-                    handleSpin(out);
-                    break;
-                case "clear":
-                    currentBets.clear();
-                    out.println("Toutes les mises ont été effacées.");
-                    break;
-                default:
-                    out.println("Action inconnue : " + action);
-            }
-        }
-    }
-
-    private void handleBet(HttpServletRequest req, PrintWriter out) {
+        String path = req.getPathInfo();
         try {
-            String typeStr = req.getParameter("type");
-            String amountStr = req.getParameter("amount");
-            String paramStr = req.getParameter("param");
+            Integer uid = requireUserId(req);
+            JsonObject body = readJson(req);
 
-            if (typeStr == null || amountStr == null) {
-                out.println("Erreur : paramètres 'type' et 'amount' requis.");
+            if ("/bets".equals(path)) {
+                String type = jStr(body, "type", null);
+                int amount  = Math.max(0, jInt(body, "amount", 0));
+                Integer param = jOptInt(body, "param");
+
+                if (!isValidBet(type, param)) { writeJson(resp, 400, err("invalid_bet", type)); return; }
+                if (amount <= 0) { writeJson(resp, 400, err("invalid_amount", String.valueOf(amount))); return; }
+
+                Integer bal = UserDao.debitCreditsIfEnough(uid, amount);
+                if (bal == null) { writeJson(resp, 402, err("insufficient_credits", null)); return; }
+                req.getSession().setAttribute("credits", bal);
+
+                UserDao.rouletteAddBet(uid, type, amount, param);
+                java.util.List<UserDao.RouletteBet> bets = UserDao.rouletteListBets(uid);
+
+                JsonObject out = new JsonObject();
+                out.addProperty("balance", bal);
+                out.add("bets", toJsonBets(bets));
+                writeJson(resp, 200, out);
                 return;
             }
 
-            BetType type = BetType.valueOf(typeStr.toUpperCase(Locale.ROOT));
-            BigDecimal amount = new BigDecimal(amountStr).setScale(2, RoundingMode.HALF_UP);
-            Integer param = (paramStr != null) ? Integer.parseInt(paramStr) : null;
+            if ("/spin".equals(path)) {
+                int n = rng.nextInt(37); // 0..36
+                String color = (n==0) ? "green" : (REDS.contains(n) ? "red" : "black");
 
-            BigDecimal engaged = currentBets.stream()
-                    .map(b -> b.amount)
-                    .reduce(amount, BigDecimal::add);
-            if (engaged.compareTo(balance) > 0) {
-                out.println("Erreur : solde insuffisant pour cette mise.");
+                java.util.List<UserDao.RouletteBet> bets = UserDao.rouletteListBets(uid);
+                int gain = computePayout(bets, n, color);
+
+                int balance = (gain > 0) ? UserDao.addCredits(uid, gain) : UserDao.getCredits(uid);
+                UserDao.rouletteClearAndRefundTotal(uid); // refund=0 attendu (mises débitées à la pose)
+                req.getSession().setAttribute("credits", balance);
+
+                // garder le dernier résultat
+                HttpSession s = req.getSession();
+                s.setAttribute("roulette_last_num", n);
+                s.setAttribute("roulette_last_col", color);
+
+                JsonObject out = new JsonObject();
+                JsonObject res = new JsonObject();
+                res.addProperty("number", n);
+                res.addProperty("color", color);
+                out.add("result", res);
+                out.addProperty("gain", gain);
+                out.addProperty("balance", balance);
+                writeJson(resp, 200, out);
                 return;
             }
 
-            currentBets.add(new Bet(type, amount, param));
-            out.println("✅ Mise ajoutée : " + type + " " + (param != null ? param : "") + " (" + amount + " €)");
-        } catch (Exception e) {
-            out.println("Erreur dans la mise : " + e.getMessage());
+            writeJson(resp, 404, err("unknown_path", path));
+        } catch (Throwable e){
+            // renvoie le message dans la réponse pour t’aider à voir l’origine dans DevTools
+            writeJson(resp, 500, err("server_error", safeMsg(e)));
         }
     }
 
-    private void handleSpin(PrintWriter out) {
-        if (currentBets.isEmpty()) {
-            out.println("Aucune mise en cours. Utilisez action=bet d'abord.");
-            return;
+    private boolean isValidBet(String type, Integer param){
+        if (type == null) return false;
+        switch (type){
+            case "STRAIGHT": return param != null && 0 <= param && param <= 36;
+            case "DOZEN":   return param != null && 1 <= param && param <= 3;
+            case "COLUMN":  return param != null && 1 <= param && 1 <= param && param <= 3;
+            case "RED": case "BLACK": case "EVEN": case "ODD": case "LOW": case "HIGH":
+                return true;
+            default: return false;
         }
+    }
 
-        BigDecimal stake = currentBets.stream()
-                .map(b -> b.amount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        balance = balance.subtract(stake);
+    private int computePayout(java.util.List<UserDao.RouletteBet> bets, int n, String color){
+        int total = 0;
+        boolean isRed   = "red".equals(color);
+        boolean isBlack = "black".equals(color);
+        boolean isGreen = "green".equals(color);
 
-        int number = rng.nextInt(37);
-        Color color = colorOf(number);
-
-        BigDecimal credited = BigDecimal.ZERO;
-        for (Bet b : currentBets) {
-            if (b.wins(number, color)) {
-                credited = credited.add(b.amount).add(b.winAmount());
+        for (UserDao.RouletteBet b : bets){
+            int a = Math.max(0, b.amount);
+            switch (b.type) {
+                case "STRAIGHT": if (b.param != null && n == b.param) total += a * 35; break;
+                case "DOZEN":
+                    if (n==0) break;
+                    int dozen = (n-1)/12 + 1; // 1..3
+                    if (b.param != null && b.param == dozen) total += a * 2;
+                    break;
+                case "COLUMN":
+                    if (n==0) break;
+                    int col = ((n-1) % 3) + 1; // 1..3
+                    if (b.param != null && b.param == col) total += a * 2;
+                    break;
+                case "RED":   if (!isGreen && isRed)   total += a; break;
+                case "BLACK": if (!isGreen && isBlack) total += a; break;
+                case "EVEN":  if (n!=0 && n%2==0)      total += a; break;
+                case "ODD":   if (n!=0 && n%2==1)      total += a; break;
+                case "LOW":   if (1 <= n && n <= 18)   total += a; break;
+                case "HIGH":  if (19 <= n && n <= 36)  total += a; break;
             }
         }
-        balance = balance.add(credited).setScale(2, RoundingMode.DOWN);
-
-        out.printf("Résultat : %d (%s)%n", number, color);
-        out.printf("Gain total : %s €%n", credited);
-        out.printf("Nouveau solde : %s €%n", balance);
-        currentBets.clear();
+        return total;
     }
 }
