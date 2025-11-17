@@ -38,6 +38,57 @@ export class SlotMachine extends Phaser.Scene {
   _add(k,cfg={}){ return this._hasAudio(k) ? this.sound.add(k,cfg) : null; }
   _play(k,cfg={}){ if(this._hasAudio(k)) this.sound.play(k,cfg); }
 
+  //Bouton home (haut droite)
+  _makeHomeButton(){
+    const pad = 14;           // marge au bord
+    const targetW = 48;       // largeur visuelle en px (ajuste si besoin)
+    const depth = 1000;       // au-dessus de tout
+
+    // si déjà créé (recreate/wake), on le détruit proprement
+    if (this.homeBtn && !this.homeBtn.destroyed) this.homeBtn.destroy();
+
+    // calcule un scale pour garder le ratio du PNG
+    const tex = this.textures.get('home').getSourceImage();
+    const scale = targetW / tex.width;
+
+    // création
+    this.homeBtn = this.add.image(this.scale.width - pad, pad, 'home')
+      .setOrigin(1, 0)
+      .setScale(scale)
+      .setAlpha(0.95)
+      .setDepth(depth)
+      .setInteractive({ useHandCursor: true });
+
+    // petits feedbacks visuels
+    this.homeBtn
+      .on('pointerover', () => this.homeBtn.setTint(0xa0e8ff))
+      .on('pointerout',  () => this.homeBtn.clearTint())
+      .on('pointerdown', () => { this._play?.('ui_click_down',{volume:0.5}); this.homeBtn.setTint(0x77d6ff); })
+      .on('pointerup',   () => { this._play?.('ui_click_up',{volume:0.5}); this.scene.start('Menu'); });
+
+    // repositionne si la fenêtre change
+    this.scale.on('resize', (gs)=>{
+      this.homeBtn.setPosition(gs.width - pad, pad);
+    }, this);
+
+    // Raccourcis clavier (ESC et H)
+    this.input.keyboard.addCapture([Phaser.Input.Keyboard.KeyCodes.ESC, Phaser.Input.Keyboard.KeyCodes.H]);
+    // évite d’empiler les handlers si la scène est recréée
+    this._goMenu?.off?.(); // no-op si pas défini
+    this._goMenu = ()=> this.scene.start('Menu');
+    this.input.keyboard.off('keydown-ESC', this._goMenu, this);
+    this.input.keyboard.off('keydown-H',   this._goMenu, this);
+    this.input.keyboard.on('keydown-ESC', this._goMenu, this);
+    this.input.keyboard.on('keydown-H',   this._goMenu, this);
+
+    // clean
+    this.events.once('shutdown', ()=>{
+      this.input.keyboard.off('keydown-ESC', this._goMenu, this);
+      this.input.keyboard.off('keydown-H',   this._goMenu, this);
+    });
+  }
+
+
   // overlay
   _prepSpin(){
     if (this.isSpinning) return;
@@ -232,6 +283,7 @@ export class SlotMachine extends Phaser.Scene {
     this.load.image('frame',      'assets/slot/cadre-slot.png');
     this.load.image('reel_clear', 'assets/slot/reel_clear.png');
     this.load.image('reel_blur',  'assets/slot/reel_blur.png');
+    this.load.image('home', 'assets/slot/home.png');
 
 
     // digits 0..9 + blank
@@ -289,7 +341,7 @@ export class SlotMachine extends Phaser.Scene {
 
   /**
    * Crée un affichage de chiffres monospaces.
-   * cfg = { x, y, digits=4, height=48, spacing=0.88, align:'center', depth=520, pad:'blank'|'zero' }
+   * cfg = { x, y, digits=4, height=48, spacing=0.88, align:'center', depth=300, pad:'blank'|'zero' }
    * Retourne un objet avec : setValue(n), animateTo(n,dur=700), setHeight(h), setPosition(x,y), setAlign(a)
    */
   _createDigits(cfg={}){
@@ -297,7 +349,7 @@ export class SlotMachine extends Phaser.Scene {
     const n      = cfg.digits ?? 4;
     const height = cfg.height ?? 48;
     const spacing= cfg.spacing ?? 0.88;
-    const depth  = cfg.depth ?? 520;
+    const depth  = cfg.depth ?? 300;
     const align  = cfg.align ?? 'center';
     const x0     = cfg.x ?? 0, y0 = cfg.y ?? 0;
 
@@ -401,6 +453,10 @@ export class SlotMachine extends Phaser.Scene {
       bgVideo.setPosition(W_bg / 2, H_bg / 2);
     };
 
+    //bouton home
+    this._makeHomeButton();
+
+
     // ajuste quand la vidéo démarre + maintenant + sur resize
     bgVideo.once('play', fitVideoCover_bg);
     bgVideo.play(true);
@@ -459,18 +515,20 @@ export class SlotMachine extends Phaser.Scene {
     this.statusText = this.add.text(14,14,'Ready',{fontFamily:'system-ui,Arial',fontSize:'16px',color:'#fff'}).setDepth(999);
 
     // --- DIGITS (simple) — édite SEULEMENT ces nombres :
-    const DIGITS_Y  = this.win.y + this.win.h + 82; // Y commun
-    const DIGIT_H   = 58;    // hauteur des chiffres
-    const DIGIT_SP  = 0.95;  // espacement entre chiffres (0.80 serré → 0.95 aéré)
+    const DIGITS_Y   = this.win.y + this.win.h + 82; // Y commun
+    const DIGIT_H    = 58;    // hauteur des chiffres
+    const DIGIT_SP   = 0.95;  // espacement entre chiffres
+    const DIGIT_DEPTH= 300;   // ⬅️ profondeur voulue (doit être < depth du cadre, ex: cadre=900)
 
-    const X_GAINS   = this.win.x + 115; // centre "Gains"
-    const X_CREDITS = this.win.x + 470; // centre "Crédits"
-    const X_MISE    = this.win.x + 675; // centre "Mise"
+    const X_GAINS    = this.win.x + 115;
+    const X_CREDITS  = this.win.x + 470;
+    const X_MISE     = this.win.x + 675;
 
-    // crée/replace les tableaux
-    this.winDigits     = this._createDigits({ x:X_GAINS,   y:DIGITS_Y, digits:4, height:DIGIT_H, spacing:DIGIT_SP, align:'center' });
-    this.creditsDigits = this._createDigits({ x:X_CREDITS, y:DIGITS_Y, digits:6, height:DIGIT_H, spacing:DIGIT_SP, align:'center' });
-    this.betDigits     = this._createDigits({ x:X_MISE,    y:DIGITS_Y, digits:3, height:DIGIT_H, spacing:DIGIT_SP, align:'center' });
+    // crée/replace les tableaux (⚠️ on passe depth)
+    this.winDigits     = this._createDigits({ x:X_GAINS,   y:DIGITS_Y, digits:4, height:DIGIT_H, spacing:DIGIT_SP, align:'center', depth:DIGIT_DEPTH });
+    this.creditsDigits = this._createDigits({ x:X_CREDITS, y:DIGITS_Y, digits:6, height:DIGIT_H, spacing:DIGIT_SP, align:'center', depth:DIGIT_DEPTH });
+    this.betDigits     = this._createDigits({ x:X_MISE,    y:DIGITS_Y, digits:3, height:DIGIT_H, spacing:DIGIT_SP, align:'center', depth:DIGIT_DEPTH });
+
 
 
 
