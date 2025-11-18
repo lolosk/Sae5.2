@@ -130,10 +130,10 @@ export class BlackJack extends Phaser.Scene {
         // ... ton code existant (bg, cartes, chips, etc.)
 
         // SONS
-    this.load.audio('flipcard',  'assets/sounds/flipcard.mp3');
-    this.load.audio('win_small', 'assets/sounds/win_small.mp3');
-    this.load.audio('blackjack','assets/sounds/blackjack.mp3');
-    this.load.audio('lose','assets/sounds/lose.mp3');
+    this.load.audio('flipcard',  'assets/blackjack/sfx/flipcard.mp3');
+    this.load.audio('win_small', 'assets/blackjack/sfx/win_small.mp3');
+    this.load.audio('blackjack','assets/blackjack/sfx/blackjack.mp3');
+    this.load.audio('lose','assets/blackjack/sfx/lose.mp3');
 
   }
 
@@ -795,147 +795,148 @@ export class BlackJack extends Phaser.Scene {
       }
     });
 
-standBtn = makeButtonRect(width * 0.58, height * 0.78, 90, 40, 'Stand', async () => {
-  if (this.animating) return;
-  this.errorText.setText('');
-  setButtonEnabled(hitBtn, false);
-  setButtonEnabled(standBtn, false);
-  setButtonEnabled(doubleBtn, false);
-
-  try {
-    const res = await api('api/blackjack/stand', { method: 'POST' });
-
-    const finalState = res.state;
-    const payout = res.payout;
-    const finalCredits = res.credits;
-
-    // main du croupier AVANT stand (déjà connue sur le client)
-    const prevDealer = this.lastDealer || [];
-    // main complète du croupier APRÈS stand (renvoyée par le serveur)
-    const allDealer = finalState.dealer || [];
-    const extra = allDealer.length - prevDealer.length; // nb de nouvelles cartes
-
-    const applyEndOfRound = () => {
-      // MAJ crédits + HUD + boutons quand le croupier a fini de piocher
-      this.creditsText.setText(`Crédits : ${finalCredits}`);
-
-      this._playing = false;
-      setButtonEnabled(startBtn, true);
-
-      const user = this.registry.get('user') || {};
-      user.credits = finalCredits;
-      this.registry.set('user', user);
-      this.game.events.emit('credits:update', finalCredits);
-
-      playSfx && playSfx(this, 'ui_click');
-    };
-
-    // Si le croupier ne pioche pas ou ne pioche qu'une carte, on garde l'ancien comportement
-    if (extra <= 1) {
-      showState(finalState, payout);
-      applyEndOfRound();
-      return;
-    }
-
-    // Sinon : ANIMATION CARTE PAR CARTE
-    const steps = [];
-    for (let i = 1; i <= extra; i++) {
-      // clone profond de l'état final
-      const s = JSON.parse(JSON.stringify(finalState));
-
-      // on ne garde que les premières cartes déjà connues + i nouvelles
-      s.dealer = allDealer.slice(0, prevDealer.length + i);
-
-      // tant qu'on n'a pas révélé la dernière carte,
-      // on garde status="playing" pour ne pas afficher le résultat/payout
-      if (i < extra) {
-        s.status = 'playing';
-      }
-
-      steps.push(s);
-    }
-
-    let idx = 0;
-    const playNext = () => {
-      const s = steps[idx];
-      const isLast = (idx === steps.length - 1);
-
-      // on n'affiche le payout que sur la DERNIÈRE carte
-      showState(s, isLast ? payout : undefined);
-
-      idx++;
-      if (idx < steps.length) {
-        // délai entre chaque tirage du croupier (ajuste 600 si on veux plus/moins rapide)
-        this.time.delayedCall(800, playNext, null, this);
-      } else {
-        // fin de sequence : on applique crédits + boutons
-        applyEndOfRound();
-      }
-    };
-
-    // on démarre l'animation
-    playNext();
-
-  } catch (e) {
-    this.errorText.setText(e.status === 401 ? 'Session expirée.' : 'Erreur serveur.');
-    if (e.status === 401) this.scene.start('Login');
-  }
-});
-
-
-    doubleBtn = makeButtonRect(width * 0.74, height * 0.78, 90, 40, 'Double', async () => {
+      standBtn = makeButtonRect(width * 0.58, height * 0.78, 90, 40, 'Stand', async () => {
       if (this.animating) return;
       this.errorText.setText('');
       setButtonEnabled(hitBtn, false);
       setButtonEnabled(standBtn, false);
       setButtonEnabled(doubleBtn, false);
+
       try {
-        const res = await api('api/blackjack/double', { method: 'POST' });
+        const res = await api('api/blackjack/stand', { method: 'POST' });
 
-        showState(res.state, res.payout);
+        const finalState = res.state;
+        const payout = res.payout;
+        const finalCredits = res.credits;
 
-        this.creditsText.setText(`Crédits : ${res.credits}`);
+        // main du croupier AVANT stand (déjà connue sur le client)
+        const prevDealer = this.lastDealer || [];
+        // main complète du croupier APRÈS stand (renvoyée par le serveur)
+        const allDealer = finalState.dealer || [];
+        const extra = allDealer.length - prevDealer.length; // nb de nouvelles cartes
 
-        this._playing = false;
-        setButtonEnabled(startBtn, true);
+        const applyEndOfRound = () => {
+          // MAJ crédits + HUD + boutons quand le croupier a fini de piocher
+          this.creditsText.setText(`Crédits : ${finalCredits}`);
 
-        const user = this.registry.get('user') || {};
-        user.credits = res.credits;
-        this.registry.set('user', user);
-        this.game.events.emit('credits:update', res.credits);
-
-        playSfx && playSfx(this, 'ui_click');
-      } catch (e) {
-        if (e.status === 409) {
-          this.errorText.setText('Crédits insuffisants pour doubler.');
-        } else if (e.status === 400) {
-          this.errorText.setText('Impossible de doubler maintenant.');
-        } else if (e.status === 401) {
-          this.errorText.setText('Session expirée.');
-          this.scene.start('Login');
-          return;
-        } else {
-          this.errorText.setText('Erreur serveur.');
-        }
-        if (this._playing) {
-          setButtonEnabled(hitBtn, true);
-          setButtonEnabled(standBtn, true);
-        } else {
+          this._playing = false;
           setButtonEnabled(startBtn, true);
+
+          const user = this.registry.get('user') || {};
+          user.credits = finalCredits;
+          this.registry.set('user', user);
+          this.game.events.emit('credits:update', finalCredits);
+
+          playSfx && playSfx(this, 'ui_click');
+        };
+
+        // Si le croupier ne pioche pas ou ne pioche qu'une carte, on garde l'ancien comportement
+        if (extra <= 1) {
+          showState(finalState, payout);
+          applyEndOfRound();
+          return;
         }
+
+        // Sinon : ANIMATION CARTE PAR CARTE
+        const steps = [];
+        for (let i = 1; i <= extra; i++) {
+          // clone profond de l'état final
+          const s = JSON.parse(JSON.stringify(finalState));
+
+          // on ne garde que les premières cartes déjà connues + i nouvelles
+          s.dealer = allDealer.slice(0, prevDealer.length + i);
+
+          // tant qu'on n'a pas révélé la dernière carte,
+          // on garde status="playing" pour ne pas afficher le résultat/payout
+          if (i < extra) {
+            s.status = 'playing';
+          }
+
+          steps.push(s);
+        }
+
+        let idx = 0;
+        const playNext = () => {
+          const s = steps[idx];
+          const isLast = (idx === steps.length - 1);
+
+          // on n'affiche le payout que sur la DERNIÈRE carte
+          showState(s, isLast ? payout : undefined);
+
+          idx++;
+          if (idx < steps.length) {
+            // délai entre chaque tirage du croupier (ajuste 600 si on veux plus/moins rapide)
+            this.time.delayedCall(800, playNext, null, this);
+          } else {
+            // fin de sequence : on applique crédits + boutons
+            applyEndOfRound();
+          }
+        };
+
+        // on démarre l'animation
+        playNext();
+
+      } catch (e) {
+        this.errorText.setText(e.status === 401 ? 'Session expirée.' : 'Erreur serveur.');
+        if (e.status === 401) this.scene.start('Login');
       }
     });
 
 
+        doubleBtn = makeButtonRect(width * 0.74, height * 0.78, 90, 40, 'Double', async () => {
+          if (this.animating) return;
+          this.errorText.setText('');
+          setButtonEnabled(hitBtn, false);
+          setButtonEnabled(standBtn, false);
+          setButtonEnabled(doubleBtn, false);
+          try {
+            const res = await api('api/blackjack/double', { method: 'POST' });
+
+            showState(res.state, res.payout);
+
+            this.creditsText.setText(`Crédits : ${res.credits}`);
+
+            this._playing = false;
+            setButtonEnabled(startBtn, true);
+
+            const user = this.registry.get('user') || {};
+            user.credits = res.credits;
+            this.registry.set('user', user);
+            this.game.events.emit('credits:update', res.credits);
+
+            playSfx && playSfx(this, 'ui_click');
+          } catch (e) {
+            if (e.status === 409) {
+              this.errorText.setText('Crédits insuffisants pour doubler.');
+            } else if (e.status === 400) {
+              this.errorText.setText('Impossible de doubler maintenant.');
+            } else if (e.status === 401) {
+              this.errorText.setText('Session expirée.');
+              this.scene.start('Login');
+              return;
+            } else {
+              this.errorText.setText('Erreur serveur.');
+            }
+            if (this._playing) {
+              setButtonEnabled(hitBtn, true);
+              setButtonEnabled(standBtn, true);
+            } else {
+              setButtonEnabled(startBtn, true);
+            }
+          }
+        });
 
 
 
 
 
-    this._playing = false;
-    setButtonEnabled(startBtn, true);
-    setButtonEnabled(hitBtn, false);
-    setButtonEnabled(standBtn, false);
-    setButtonEnabled(doubleBtn, false);
+
+
+     this._playing = false;
+     setButtonEnabled(startBtn, true);
+     setButtonEnabled(hitBtn, false);
+     setButtonEnabled(standBtn, false);
+
+     setButtonEnabled(doubleBtn, false);
   }
 }
