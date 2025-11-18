@@ -89,7 +89,7 @@ export class Roulette extends Phaser.Scene {
     }).setOrigin(0.5,0);
 
     // Solde actuel + dernier tirage connu
-    this.balanceTxt = this.add.text(16, 16, 'Solde: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
+    this.balanceTxt = this.add.text(16, 16, 'Crédits: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
     this.balance = 0;
     this.lastTxt    = this.add.text(16, 40, 'Dernier: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
 
@@ -706,7 +706,7 @@ export class Roulette extends Phaser.Scene {
    */
   _initBalance(n){
     this.balanceVal = Number(n) || 0;
-    if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balanceVal));
+    if (this.balanceTxt) this.balanceTxt.setText('Crédits: ' + this._euro(this.balanceVal));
   }
 
   /**
@@ -715,7 +715,7 @@ export class Roulette extends Phaser.Scene {
    */
   _applyCredit(n){
     this.balanceVal = (Number(this.balanceVal)||0) + (Number(n)||0);
-    if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balanceVal));
+    if (this.balanceTxt) this.balanceTxt.setText('Crédits: ' + this._euro(this.balanceVal));
   }
 
   /**
