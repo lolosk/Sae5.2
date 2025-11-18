@@ -82,7 +82,7 @@ public class UserDao {
 
     // --- AJOUTER DANS LA CLASSE UserDao ---
 
-    /** Met à jour les crédits d'un utilisateur. */
+    /** Met à jour les crédits d'un utilisateur (valeur absolue). */
     public static void updateCredits(int userId, int newCredits) throws SQLException {
         final String sql = "UPDATE users SET credits = ? WHERE id = ?";
         try (Connection cn = DatabaseConnection.getConnection();
@@ -95,6 +95,7 @@ public class UserDao {
 
     /** Insère une ligne d'historique dans la table games.
      *  resultJson est un JSON (stocké en TEXT sous SQLite).
+     *  La colonne created_at est remplie automatiquement.
      */
     public static void insertGameLog(int userId, String gameType, int bet, String resultJson) throws SQLException {
         final String sql = "INSERT INTO games(user_id, game_type, bet, result, created_at) " +
@@ -108,6 +109,7 @@ public class UserDao {
             ps.executeUpdate();
         }
     }
+
 
 
     // Renvoie le nouveau solde si le débit passe, sinon null (fonds insuffisants)
@@ -167,4 +169,9 @@ public class UserDao {
         public String passwordHash;
         public int credits;
     }
+
+
+
+
+
 }
