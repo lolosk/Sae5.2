@@ -131,7 +131,7 @@ export class BlackJack extends Phaser.Scene {
 
         // SONS
     this.load.audio('flipcard',  'assets/blackjack/sfx/flipcard.mp3');
-    this.load.audio('win_small', 'assets/blackjack/sfx/win_small.mp3');
+    this.load.audio('win_small_bj', 'assets/blackjack/sfx/win_small_bj.mp3');
     this.load.audio('blackjack','assets/blackjack/sfx/blackjack.mp3');
     this.load.audio('lose','assets/blackjack/sfx/lose.mp3');
 
@@ -451,7 +451,7 @@ export class BlackJack extends Phaser.Scene {
 
           this.time.delayedCall(350, () => { // 0.35s après l'affichage du résultat
             if (win) {
-              playSfx(this, 'win_small', { volume: 0.7 });
+              playSfx(this, 'win_small_bj', { volume: 0.7 });
             } else {
               playSfx(this, 'lose', { volume: 0.7 });
             }
