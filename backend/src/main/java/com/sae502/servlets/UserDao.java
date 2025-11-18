@@ -80,16 +80,16 @@ public class UserDao {
         }
     }
 
-
-
-
     // ==== Roulette (stockage des mises) =========================================
     public static class RouletteBet {
         public final String type;     // STRAIGHT / DOZEN / COLUMN / RED / BLACK / EVEN / ODD / LOW / HIGH
         public final int amount;      // crédits engagés
         public final Integer param;   // STRAIGHT: 0..36, DOZEN:1..3, COLUMN:1..3, autres: null
+
         public RouletteBet(String type, int amount, Integer param){
-            this.type = type; this.amount = amount; this.param = param;
+            this.type  = type;
+            this.amount = amount;
+            this.param = param;
         }
     }
 
@@ -98,7 +98,9 @@ public class UserDao {
         try (java.sql.Connection c = DatabaseConnection.getConnection();
              java.sql.PreparedStatement ps = c.prepareStatement(
                      "SELECT type, amount, param FROM roulette_bets WHERE user_id=? ORDER BY id ASC")) {
+
             ps.setInt(1, userId);
+
             try (java.sql.ResultSet rs = ps.executeQuery()) {
                 java.util.List<RouletteBet> out = new java.util.ArrayList<>();
                 while (rs.next()) {
@@ -119,6 +121,7 @@ public class UserDao {
              java.sql.PreparedStatement ps = c.prepareStatement(
                      "INSERT INTO roulette_bets(user_id,type,amount,param,created_at) " +
                              "VALUES(?,?,?,?,CURRENT_TIMESTAMP)")) {
+
             ps.setInt(1, userId);
             ps.setString(2, type);
             ps.setInt(3, amount);
@@ -133,28 +136,30 @@ public class UserDao {
         try (java.sql.Connection c = DatabaseConnection.getConnection()) {
             c.setAutoCommit(false);
             int total = 0;
+
             try (java.sql.PreparedStatement ps = c.prepareStatement(
                     "SELECT COALESCE(SUM(amount),0) FROM roulette_bets WHERE user_id=?")) {
                 ps.setInt(1, userId);
-                try (java.sql.ResultSet rs = ps.executeQuery()) { if (rs.next()) total = rs.getInt(1); }
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) total = rs.getInt(1);
+                }
             }
+
             try (java.sql.PreparedStatement del = c.prepareStatement(
                     "DELETE FROM roulette_bets WHERE user_id=?")) {
                 del.setInt(1, userId);
                 del.executeUpdate();
             }
+
             c.commit();
             return total;
         }
     }
 
 
+    // --- Crédits & logs de parties communs à tous les jeux ----------------------
 
-
-
-    // --- AJOUTER DANS LA CLASSE UserDao ---
-
-    /** Met à jour les crédits d'un utilisateur. */
+    /** Met à jour les crédits d'un utilisateur (valeur absolue). */
     public static void updateCredits(int userId, int newCredits) throws SQLException {
         final String sql = "UPDATE users SET credits = ? WHERE id = ?";
         try (Connection cn = DatabaseConnection.getConnection();
@@ -167,6 +172,7 @@ public class UserDao {
 
     /** Insère une ligne d'historique dans la table games.
      *  resultJson est un JSON (stocké en TEXT sous SQLite).
+     *  La colonne created_at est remplie automatiquement.
      */
     public static void insertGameLog(int userId, String gameType, int bet, String resultJson) throws SQLException {
         final String sql = "INSERT INTO games(user_id, game_type, bet, result, created_at) " +
@@ -181,8 +187,7 @@ public class UserDao {
         }
     }
 
-
-    // Renvoie le nouveau solde si le débit passe, sinon null (fonds insuffisants)
+    /** Renvoie le nouveau solde si le débit passe, sinon null (fonds insuffisants). */
     public static Integer debitCreditsIfEnough(int userId, int amount) throws SQLException {
         if (amount <= 0) return getCredits(userId);
         try (Connection c = DatabaseConnection.getConnection()) {
@@ -193,7 +198,10 @@ public class UserDao {
                 up.setInt(2, userId);
                 up.setInt(3, amount);
                 int updated = up.executeUpdate();
-                if (updated == 0) { c.rollback(); return null; } // pas assez de crédits
+                if (updated == 0) {
+                    c.rollback();
+                    return null; // pas assez de crédits
+                }
             }
             int credits = getCreditsTx(c, userId);
             c.commit();
@@ -221,15 +229,18 @@ public class UserDao {
     private static int getCreditsTx(Connection c, int userId) throws SQLException {
         try (PreparedStatement ps = c.prepareStatement("SELECT credits FROM users WHERE id = ?")) {
             ps.setInt(1, userId);
-            try (ResultSet rs = ps.executeQuery()) { rs.next(); return rs.getInt(1); }
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
         }
     }
 
     public static int getCredits(int userId) throws SQLException {
-        try (Connection c = DatabaseConnection.getConnection()) { return getCreditsTx(c, userId); }
+        try (Connection c = DatabaseConnection.getConnection()) {
+            return getCreditsTx(c, userId);
+        }
     }
-
-
 
 
     // Petit DTO interne
