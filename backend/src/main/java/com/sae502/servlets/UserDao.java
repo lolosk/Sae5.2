@@ -80,6 +80,86 @@ public class UserDao {
         }
     }
 
+    // --- AJOUTER DANS LA CLASSE UserDao ---
+
+    /** Met à jour les crédits d'un utilisateur. */
+    public static void updateCredits(int userId, int newCredits) throws SQLException {
+        final String sql = "UPDATE users SET credits = ? WHERE id = ?";
+        try (Connection cn = DatabaseConnection.getConnection();
+             PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setInt(1, newCredits);
+            ps.setInt(2, userId);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Insère une ligne d'historique dans la table games.
+     *  resultJson est un JSON (stocké en TEXT sous SQLite).
+     */
+    public static void insertGameLog(int userId, String gameType, int bet, String resultJson) throws SQLException {
+        final String sql = "INSERT INTO games(user_id, game_type, bet, result, created_at) " +
+                "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)";
+        try (Connection cn = DatabaseConnection.getConnection();
+             PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setInt(1, userId);
+            ps.setString(2, gameType);
+            ps.setInt(3, bet);
+            ps.setString(4, resultJson);
+            ps.executeUpdate();
+        }
+    }
+
+
+    // Renvoie le nouveau solde si le débit passe, sinon null (fonds insuffisants)
+    public static Integer debitCreditsIfEnough(int userId, int amount) throws SQLException {
+        if (amount <= 0) return getCredits(userId);
+        try (Connection c = DatabaseConnection.getConnection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement up = c.prepareStatement(
+                    "UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?")) {
+                up.setInt(1, amount);
+                up.setInt(2, userId);
+                up.setInt(3, amount);
+                int updated = up.executeUpdate();
+                if (updated == 0) { c.rollback(); return null; } // pas assez de crédits
+            }
+            int credits = getCreditsTx(c, userId);
+            c.commit();
+            return credits;
+        }
+    }
+
+    public static int addCredits(int userId, int amount) throws SQLException {
+        if (amount <= 0) return getCredits(userId);
+        try (Connection c = DatabaseConnection.getConnection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement up = c.prepareStatement(
+                    "UPDATE users SET credits = credits + ? WHERE id = ?")) {
+                up.setInt(1, amount);
+                up.setInt(2, userId);
+                up.executeUpdate();
+            }
+            int credits = getCreditsTx(c, userId);
+            c.commit();
+            return credits;
+        }
+    }
+
+    // Helpers
+    private static int getCreditsTx(Connection c, int userId) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("SELECT credits FROM users WHERE id = ?")) {
+            ps.setInt(1, userId);
+            try (ResultSet rs = ps.executeQuery()) { rs.next(); return rs.getInt(1); }
+        }
+    }
+
+    public static int getCredits(int userId) throws SQLException {
+        try (Connection c = DatabaseConnection.getConnection()) { return getCreditsTx(c, userId); }
+    }
+
+
+
+
     // Petit DTO interne
     public static class UserRow {
         public int id;
