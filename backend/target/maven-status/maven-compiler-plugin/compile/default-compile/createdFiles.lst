@@ -1,5 +1,3 @@
-com\sae502\servlets\MeServlet.class
-com\sae502\servlets\UserDao$UserRow.class
 com\sae502\servlets\RouletteServlet.class
 com\sae502\servlets\BlackJackServlet.class
 com\sae502\servlets\MeServlet.class

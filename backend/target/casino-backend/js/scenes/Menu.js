@@ -140,7 +140,7 @@ export class Menu extends Phaser.Scene {
 
     // --- Crée la liste des boutons disponibles (dans l'ordre d'affichage)
     const buttons = [];
-    const slotBtn = makeImgBtn('btn_slot', () => this.scene.start('Slot'));
+    const slotBtn = makeImgBtn('btn_slot', () => this.scene.start('SlotMachine'));
     if (slotBtn) buttons.push(slotBtn);
 
     const rouletteBtn = makeImgBtn('btn_roulette', () => this.scene.start('Roulette'));
