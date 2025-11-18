@@ -545,7 +545,20 @@ export class SlotMachine extends Phaser.Scene {
     this.betDigits.setValue(this.bet);
 
     // maj auto crédits si l'app émet 'credits:update'
-    this.game.events.on('credits:update', c=> this.creditsDigits.setValue(c));
+    this._onCreditsUpdate = (c) => {
+      // Si la scène n'est plus active, on ne fait rien
+      if (!this.sys || !this.sys.isActive() || !this.creditsDigits) return;
+      this.creditsDigits.setValue(c);
+    };
+    this.game.events.on('credits:update', this._onCreditsUpdate);
+
+    // Quand la scène Slot est arrêtée, on enlève le listener global
+    this.events.once('shutdown', () => {
+      if (this._onCreditsUpdate) {
+        this.game.events.off('credits:update', this._onCreditsUpdate);
+      }
+    });
+
 
 
     // Spin config

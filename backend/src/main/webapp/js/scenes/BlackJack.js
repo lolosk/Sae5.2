@@ -9,9 +9,96 @@ export class BlackJack extends Phaser.Scene {
     super('BlackJack');
   }
 
+    // Bouton home (haut droite) + ESC/H => retour Menu
+    _makeHomeButton(){
+      const pad     = 14;   // marge au bord
+      const targetW = 48;   // largeur visuelle (comme sur la Slot)
+      const depth   = 1000; // au-dessus de tout
+
+      // si déjà créé (wake/recreate), on le détruit proprement
+      if (this.homeBtn && !this.homeBtn.destroyed) this.homeBtn.destroy();
+
+      if (!this.textures.exists('home')) return; // sécurité
+
+      const tex   = this.textures.get('home').getSourceImage();
+      const scale = targetW / tex.width;
+
+      this.homeBtn = this.add.image(this.scale.width - pad, pad, 'home')
+        .setOrigin(1, 0)
+        .setScale(scale)
+        .setAlpha(0.95)
+        .setDepth(depth)
+        .setInteractive({ useHandCursor: true });
+
+      // feedback visuel
+      this.homeBtn
+        .on('pointerover', () => this.homeBtn.setTint(0xa0e8ff))
+        .on('pointerout',  () => this.homeBtn.clearTint())
+        .on('pointerdown', () => {
+          playSfx?.(this, 'ui_click_down', { volume: 0.5 });
+          this.homeBtn.setTint(0x77d6ff);
+        })
+        .on('pointerup',   () => {
+          playSfx?.(this, 'ui_click_up', { volume: 0.5 });
+          this.scene.start('Menu');
+        });
+
+      // repositionner sur resize
+      this.scale.on('resize', (gs)=>{
+        this.homeBtn.setPosition(gs.width - pad, pad);
+      }, this);
+
+      // Raccourcis clavier ESC / H => Menu
+      this.input.keyboard.addCapture([
+        Phaser.Input.Keyboard.KeyCodes.ESC,
+        Phaser.Input.Keyboard.KeyCodes.H
+      ]);
+
+      this._goMenu?.off?.(); // no-op si pas défini
+      this._goMenu = () => this.scene.start('Menu');
+
+      this.input.keyboard.off('keydown-ESC', this._goMenu, this);
+      this.input.keyboard.off('keydown-H',   this._goMenu, this);
+      this.input.keyboard.on('keydown-ESC', this._goMenu, this);
+      this.input.keyboard.on('keydown-H',   this._goMenu, this);
+
+      // clean à la destruction de la scène
+      this.events.once('shutdown', ()=>{
+        this.input.keyboard.off('keydown-ESC', this._goMenu, this);
+        this.input.keyboard.off('keydown-H',   this._goMenu, this);
+      });
+    }
+
+    /**
+     * Recharge le user et les crédits via /api/me
+     * pour être bien synchro après avoir joué à la Slot ou Roulette.
+     */
+    async _reloadUserFromMe(){
+      try {
+        const me = await api('api/me', { method: 'GET' });
+        if (me && me.user) {
+          const user = me.user;
+          this.registry.set('user', user);
+          if (this.creditsText) {
+            this.creditsText.setText(`Crédits : ${user.credits ?? 0}`);
+          }
+        }
+      } catch (e) {
+        // si la session a sauté entre temps
+        if (e.status === 401) {
+          this.scene.start('Login');
+        }
+      }
+    }
+
+
+
   preload() {
     // Fond blackjack
     this.load.image('bg_blackjack', 'assets/blackjack/bg_blackjack.png');
+
+    //home bouton
+    this.load.image('home', 'assets/blackjack/home.png');
 
     // Cartes :
     const ranksServer = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
@@ -55,6 +142,10 @@ export class BlackJack extends Phaser.Scene {
     const u0 = this.registry.get('user');
     if (!u0) return this.scene.start('Login');
 
+    // On resynchronise les crédits avec le back (utile après avoir joué à la Slot)
+    this._reloadUserFromMe();
+
+
     addSoundToggle(this);
 
     // --- BACKGROUND ---
@@ -62,6 +153,10 @@ export class BlackJack extends Phaser.Scene {
       .setOrigin(0.5);
     this.background.displayWidth = width;
     this.background.displayHeight = height;
+
+    // Bouton Home
+    this._makeHomeButton();
+
 
     // --- POSITIONS DES MAINS ---
     const dealerY = height * 0.25;
@@ -567,68 +662,115 @@ export class BlackJack extends Phaser.Scene {
 
     // --- BOUTONS START / HIT / STAND / DOUBLE ---
 
+    // --- BOUTON START ---
     startBtn = makeButtonRect(width * 0.26, height * 0.78, 90, 40, 'Start', async () => {
       if (this.animating) return;
       this.errorText.setText('');
+
       const bet = this.bet | 0;
       if (bet <= 0) {
         this.errorText.setText('Mise invalide');
         return;
       }
+
+      // Check local : si crédits < bet, on évite d'appeler le serveur pour rien
+      const regUser = this.registry.get('user') || {};
+      const credits = Number(regUser.credits ?? 0);
+      if (credits < bet) {
+        this.errorText.setText('Crédits insuffisants.');
+        return;
+      }
+
       this.roundResultSoundPlayed = false;
       resetBlackjackFx();
 
-
       setButtonEnabled(startBtn, false);
-      setButtonEnabled(hitBtn, false);
+      setButtonEnabled(hitBtn,   false);
       setButtonEnabled(standBtn, false);
-      setButtonEnabled(doubleBtn, false);
+      setButtonEnabled(doubleBtn,false);
 
+      let res;
+      // 1) On isole les VRAIES erreurs réseau / HTTP
       try {
-        const res = await api('api/blackjack/start', { method: 'POST', body: { bet } });
+        res = await api('api/blackjack/start', { method: 'POST', body: { bet } });
+        console.log('BJ /start response', res);
+      } catch (e) {
+        console.error('BJ /start HTTP error', e);
 
+        if (e.status === 409) {
+          this.errorText.setText('Crédits insuffisants.');
+        } else if (e.status === 401) {
+          this.errorText.setText('Session expirée.');
+          this.scene.start('Login');
+          return;
+        } else {
+          const detail =
+            (e.body && (e.body.detail || e.body.error)) ||
+            e.message ||
+            '';
+          this.errorText.setText(detail ? `Erreur serveur : ${detail}` : 'Erreur serveur.');
+        }
+
+        this._playing = false;
+        setButtonEnabled(startBtn, true);
+        return; // on ne continue pas si le serveur a vraiment répondu en erreur
+      }
+
+      // 2) Tout ce qui est purement côté client est dans un autre try/catch
+      try {
         this.lastPlayer = [];
         this.lastDealer = [];
 
-        const status = res.state && res.state.status ? res.state.status : 'playing';
+        // sécurité : vérifier que le serveur renvoie bien un state
+        if (!res.state || !Array.isArray(res.state.player) || !Array.isArray(res.state.dealer)) {
+          const msg = res.error || res.detail || 'réponse invalide';
+          this.errorText.setText(`Erreur serveur : ${msg}`);
+          this._playing = false;
+          setButtonEnabled(startBtn, true);
+          return;
+        }
+
+        const status = res.state.status || 'playing';
         const payout = (typeof res.payout === 'number') ? res.payout : undefined;
 
         // affiche les cartes + éventuel payout (blackjack direct)
         showState(res.state, payout);
 
-        this.creditsText.setText(`Crédits : ${res.credits}`);
+        // MAJ crédits affichés
+        const newCredits = (typeof res.credits === 'number') ? res.credits : credits;
+        this.creditsText.setText(`Crédits : ${newCredits}`);
 
         // MAJ HUD global (registry)
         const user = this.registry.get('user') || {};
-        user.credits = res.credits;
+        user.credits = newCredits;
         this.registry.set('user', user);
-        this.game.events.emit('credits:update', res.credits);
+        this.game.events.emit('credits:update', newCredits);
 
         if (status === 'playing') {
           // partie normale : on laisse jouer
           this._playing = true;
           setButtonEnabled(startBtn, false);
-          setButtonEnabled(hitBtn, true);
+          setButtonEnabled(hitBtn,   true);
           setButtonEnabled(standBtn, true);
+          setButtonEnabled(doubleBtn, canDouble(res.state));
         } else {
           // blackjack instantané -> manche terminée
           this._playing = false;
-          setButtonEnabled(startBtn, true);
-          setButtonEnabled(hitBtn, false);
-          setButtonEnabled(standBtn, false);
+          setButtonEnabled(startBtn,  true);
+          setButtonEnabled(hitBtn,    false);
+          setButtonEnabled(standBtn,  false);
           setButtonEnabled(doubleBtn, false);
         }
-      } catch (e) {
-        if (e.status === 409) this.errorText.setText('Crédits insuffisants.');
-        else if (e.status === 401) {
-          this.errorText.setText('Session expirée.');
-          this.scene.start('Login');
-          return;
-        } else this.errorText.setText('Erreur serveur.');
+      } catch (err) {
+        // ICI, ce sont les erreurs JS (showState, updateValues...) après une réponse 200
+        console.error('BJ /start JS error', err);
+        this.errorText.setText('Erreur client (voir console F12).');
+
         this._playing = false;
         setButtonEnabled(startBtn, true);
       }
     });
+
 
     hitBtn = makeButtonRect(width * 0.42, height * 0.78, 90, 40, 'Hit', async () => {
       if (this.animating) return;
@@ -783,6 +925,12 @@ standBtn = makeButtonRect(width * 0.58, height * 0.78, 90, 40, 'Stand', async ()
         }
       }
     });
+
+
+
+
+
+
 
     this._playing = false;
     setButtonEnabled(startBtn, true);
