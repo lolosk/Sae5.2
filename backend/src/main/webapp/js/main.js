@@ -6,6 +6,8 @@ import { Register } from './scenes/Register.js';
 import { Login }    from './scenes/Login.js';
 import { Menu }     from './scenes/Menu.js';
 import { SlotMachine } from './scenes/SlotMachine.js';
+import { Roulette }     from './scenes/Roulette.js';
+import { BlackJack }     from './scenes/BlackJack.js';
 
 const config = {
   type: Phaser.AUTO,
