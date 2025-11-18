@@ -24,6 +24,9 @@ export class Roulette extends Phaser.Scene {
   preload(){
     const L = (k,p)=>{ if(!this.textures.exists(k)) this.load.image(k,p); };
 
+    //home bouton
+    this.load.image('home', 'assets/roulette/home.png');
+
     // Images de décor et d'interface (fond, boutons principaux)
     L('rouletteBg',        'assets/roulette/bgRoulette.png');
     L('spinBtn',           'assets/roulette/spin-roulette.png');
@@ -52,6 +55,7 @@ export class Roulette extends Phaser.Scene {
   }
 
 
+
 // CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE CREATE
   /**
    * Point d'entrée de la scène.
@@ -71,6 +75,9 @@ export class Roulette extends Phaser.Scene {
       this.add.image(W/2, H/2, 'rouletteBg').setDisplaySize(W, H);
     }
 
+    //bouton home
+    this._makeHomeButton();
+
     // Variables locales de jeu
     this.betUnit = 10;
     this.localBets = [];
@@ -89,7 +96,7 @@ export class Roulette extends Phaser.Scene {
     }).setOrigin(0.5,0);
 
     // Solde actuel + dernier tirage connu
-    this.balanceTxt = this.add.text(16, 16, 'Solde: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
+    this.balanceTxt = this.add.text(16, 16, 'Crédits: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
     this.balance = 0;
     this.lastTxt    = this.add.text(16, 40, 'Dernier: —', { fontFamily:'monospace', fontSize:16, color:'#cfe7ff' });
 
@@ -150,21 +157,26 @@ export class Roulette extends Phaser.Scene {
 
 
 
-    // Bouton "Spin" : lance un tirage de roulette via le backend
-    if (this.wheel) {
+    // ------------------------------------------------------------------
+    // Bouton "Spin" manuel - DEBUG ONLY (désactivé, on utilise le timer auto)
+    // ------------------------------------------------------------------
+    const DEBUG_SPIN_BUTTON = false;
+
+    if (DEBUG_SPIN_BUTTON && this.wheel) {
       const wheelBottom = this.wheelGroup.y + (this.wheel.displayHeight / 2);
 
       const spin = this._imageBtn(
-        this.wheelGroup.x,        // centré sous la roue
-        wheelBottom + 100,        // 100 px sous la roue
+        this.wheelGroup.x,
+        wheelBottom + 100,
         'spinBtn',
         async ()=>{ await this._doSpin(); }
       );
       if (spin){
         spin.setScale(0.15);
-        this.spinBtn = spin;      // on garde une référence pour _setSpinEnabled
+        this.spinBtn = spin;
       }
     }
+
 
 
     // Paramètres de base pour la grille de numéros
@@ -220,6 +232,18 @@ export class Roulette extends Phaser.Scene {
 
       // Bouton CLEAR sous le 35
       const clearBtn = this._imageBtn(c35.cx, yBelow, 'clearBtn', () => {
+
+        // Si le timer est inférieur ou égal à 10s, on bloque le clear
+        if (typeof this.roundTimeLeft === 'number' && this.roundTimeLeft <= 10) {
+          this._toast('Impossible d\'effacer les mises à moins de 10s du tirage.');
+          return;
+        }
+        // (optionnel) si tu utilises bettingOpen comme garde global :
+        // if (this.bettingOpen === false) {
+        //   this._toast('Mises closes, clear impossible.');
+        //   return;
+        // }
+
         // On affiche le message tout de suite
         this._toast('Mises effacées.');
 
@@ -227,6 +251,7 @@ export class Roulette extends Phaser.Scene {
         this._clearBets().catch(()=>{});
       });
       if (clearBtn) clearBtn.setScale(0.6).setDepth(60);
+
 
       // Jeton vert sous le 36 (miser plus)
       const big_chip = this._imageBtn(c36.cx, yBelow, 'GreenChipsBtn', () => {
@@ -256,17 +281,17 @@ export class Roulette extends Phaser.Scene {
       const fontSize = 12; // << plus petit ici
 
       this._btn(
-        c1.cx, yAbove, 'Column 1',
+        c1.cx, yAbove, '2 To 1',
         async () => await this._placeParamBet('COLUMN', 1),
         btnW, btnH, fontSize
       );
       this._btn(
-        c2.cx, yAbove, 'Column 2',
+        c2.cx, yAbove, '2 To 1',
         async () => await this._placeParamBet('COLUMN', 2),
         btnW, btnH, fontSize
       );
       this._btn(
-        c3.cx, yAbove, 'Column 3',
+        c3.cx, yAbove, '2 To 1',
         async () => await this._placeParamBet('COLUMN', 3),
         btnW, btnH, fontSize
       );
@@ -289,16 +314,16 @@ export class Roulette extends Phaser.Scene {
     // --- Boutons RED / BLACK / EVEN / ODD / 1-18 / 19-36 sur le côté du tapis ---
 
     const quicks = [
-      { label: '1-18',  type: 'LOW',   colorBg: 0x14253a },
-      { label: 'EVEN',  type: 'EVEN',  colorBg: 0x14253a },
+      { label: '1-18',  type: 'LOW',   colorBg: 0x14253a }, // 1ere moitie
+      { label: 'EVEN',  type: 'EVEN',  colorBg: 0x14253a }, // PAIRE
       { label: 'RED',   type: 'RED',   colorBg: 0xb00000 }, // ROUGE
       { label: 'BLACK', type: 'BLACK', colorBg: 0x000000 }, // NOIR
-      { label: 'ODD',   type: 'ODD',   colorBg: 0x14253a },
-      { label: '19-36', type: 'HIGH',  colorBg: 0x14253a }
+      { label: 'ODD',   type: 'ODD',   colorBg: 0x14253a }, // IMPAIRE
+      { label: '19-36', type: 'HIGH',  colorBg: 0x14253a } // 2nde moitie
     ];
 
     // Décalage horizontal à droite de la grille
-    const offsetX = 109;
+    const offsetX = 159;
 
     // Hauteur du bouton
     const btnH = 91;
@@ -309,6 +334,34 @@ export class Roulette extends Phaser.Scene {
     // Position de départ
     const startX = tableLeft + tableWidth + offsetX;
     const startY = top + 46;
+
+    // --- Colonne DOZEN (1-12 / 13-24 / 25-36) à gauche de RED/BLACK/etc ---
+    const dozens = [
+      { label: '1-12',  param: 1 },
+      { label: '13-24', param: 2 },
+      { label: '25-36', param: 3 }
+    ];
+
+    // On place les DOZEN à gauche de la colonne quicks, avec un petit espace
+    const dozenBtnW   = 48; // largeur des boutons dozens
+    const dozenBtnH   = 182; // Hauteur des bouton dozens
+    const dozenGapX   = 0; // espace horizontal entre dozen et les quicks (BLACK, RED, ODD, EVEN, 1-18, 19-36)
+    const dozenX      = startX - 71;
+    const dozenStartY = startY + 46; // aligné avec les quicks à droite.
+
+    dozens.forEach((d, i) => {
+      const y = dozenStartY + i * (dozenBtnH + 0); // 6 px d’espace vertical
+
+      this._btn(
+        dozenX,
+        y,
+        d.label,
+        async () => this._placeParamBet('DOZEN', d.param),
+        dozenBtnW,
+        dozenBtnH,
+        16 // fontSize
+      );
+    });
 
     quicks.forEach((q, i) => {
       const y = startY + i * (btnH + spacing);
@@ -341,12 +394,12 @@ export class Roulette extends Phaser.Scene {
         // Boutons pour les douzaines (mises de type DOZEN)
         const dozenLayout = {
           startX: 85,   // X du premier bouton (déplace tout le groupe en X)
-          gapX:   85,   // espace horizontal entre chaque bouton
+          gapX:   -30,   // espace horizontal entre chaque bouton
           y:      24 + 56 + 40, // position Y commune (descendre = augmenter)
           w:      70,   // largeur des boutons
           h:      40     // hauteur des boutons
         };
-
+        /*
         this._btn(
           dozenLayout.startX,
           dozenLayout.y,
@@ -373,9 +426,73 @@ export class Roulette extends Phaser.Scene {
           dozenLayout.w,
           dozenLayout.h
         );
-
+        */
 
   }
+
+
+      // Bouton Home (haut droite) + raccourcis ESC / H
+      _makeHomeButton(){
+        const pad     = 14;   // marge par rapport au bord
+        const targetW = 48;   // largeur visuelle
+        const depth   = 1000; // au-dessus de tout
+
+        // si déjà créé (recreate/wake), on le détruit proprement
+        if (this.homeBtn && !this.homeBtn.destroyed) this.homeBtn.destroy();
+
+        if (!this.textures.exists('home')) return; // sécurité
+
+        // calcule un scale qui respecte le PNG
+        const tex   = this.textures.get('home').getSourceImage();
+        const scale = targetW / tex.width;
+
+        this.homeBtn = this.add.image(this.scale.width - pad, pad, 'home')
+          .setOrigin(1, 0)
+          .setScale(scale)
+          .setAlpha(0.95)
+          .setDepth(depth)
+          .setInteractive({ useHandCursor: true });
+
+        // feedback visuel + SFX (optionnels)
+        this.homeBtn
+          .on('pointerover', () => this.homeBtn.setTint(0xa0e8ff))
+          .on('pointerout',  () => this.homeBtn.clearTint())
+          .on('pointerdown', () => {
+            // si tu as playSfx / ui_click_down
+            playSfx?.(this, 'ui_click_down', { volume: 0.5 });
+            this.homeBtn.setTint(0x77d6ff);
+          })
+          .on('pointerup',   () => {
+            playSfx?.(this, 'ui_click_up', { volume: 0.5 });
+            this.scene.start('Menu');
+          });
+
+        // repositionnement si la fenêtre change
+        this.scale.on('resize', (gs)=>{
+          this.homeBtn.setPosition(gs.width - pad, pad);
+        }, this);
+
+        // Raccourcis clavier ESC / H
+        this.input.keyboard.addCapture([
+          Phaser.Input.Keyboard.KeyCodes.ESC,
+          Phaser.Input.Keyboard.KeyCodes.H
+        ]);
+
+        this._goMenu?.off?.(); // no-op si jamais défini
+        this._goMenu = () => this.scene.start('Menu');
+
+        this.input.keyboard.off('keydown-ESC', this._goMenu, this);
+        this.input.keyboard.off('keydown-H',   this._goMenu, this);
+        this.input.keyboard.on('keydown-ESC',  this._goMenu, this);
+        this.input.keyboard.on('keydown-H',    this._goMenu, this);
+
+        // nettoyage quand la scène est détruite
+        this.events.once('shutdown', ()=>{
+          this.input.keyboard.off('keydown-ESC', this._goMenu, this);
+          this.input.keyboard.off('keydown-H',   this._goMenu, this);
+        });
+      }
+
 
 
   /**
@@ -392,7 +509,7 @@ export class Roulette extends Phaser.Scene {
     const offsetLeft = 80; // augmente cette valeur pour pousser encore plus à gauche
 
     const wheelX = W - rightMargin - maxSize/2 - offsetLeft;
-    const wheelY = Math.max(H*0.45, 220);
+    const wheelY = Math.max(H*0.5, 220);
 
     this.wheelGroup = this.add.container(wheelX, wheelY);
 
@@ -660,7 +777,7 @@ export class Roulette extends Phaser.Scene {
    */
   _initBalance(n){
     this.balanceVal = Number(n) || 0;
-    if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balanceVal));
+    if (this.balanceTxt) this.balanceTxt.setText('Crédits: ' + this._euro(this.balanceVal));
   }
 
   /**
@@ -669,7 +786,7 @@ export class Roulette extends Phaser.Scene {
    */
   _applyCredit(n){
     this.balanceVal = (Number(this.balanceVal)||0) + (Number(n)||0);
-    if (this.balanceTxt) this.balanceTxt.setText('Solde: ' + this._euro(this.balanceVal));
+    if (this.balanceTxt) this.balanceTxt.setText('Crédits: ' + this._euro(this.balanceVal));
   }
 
   /**
