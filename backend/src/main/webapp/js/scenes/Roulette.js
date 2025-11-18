@@ -274,17 +274,17 @@ export class Roulette extends Phaser.Scene {
       const fontSize = 12; // << plus petit ici
 
       this._btn(
-        c1.cx, yAbove, 'Column 1',
+        c1.cx, yAbove, '2 To 1',
         async () => await this._placeParamBet('COLUMN', 1),
         btnW, btnH, fontSize
       );
       this._btn(
-        c2.cx, yAbove, 'Column 2',
+        c2.cx, yAbove, '2 To 1',
         async () => await this._placeParamBet('COLUMN', 2),
         btnW, btnH, fontSize
       );
       this._btn(
-        c3.cx, yAbove, 'Column 3',
+        c3.cx, yAbove, '2 To 1',
         async () => await this._placeParamBet('COLUMN', 3),
         btnW, btnH, fontSize
       );
@@ -307,16 +307,16 @@ export class Roulette extends Phaser.Scene {
     // --- Boutons RED / BLACK / EVEN / ODD / 1-18 / 19-36 sur le côté du tapis ---
 
     const quicks = [
-      { label: '1-18',  type: 'LOW',   colorBg: 0x14253a },
-      { label: 'EVEN',  type: 'EVEN',  colorBg: 0x14253a },
+      { label: '1-18',  type: 'LOW',   colorBg: 0x14253a }, // 1ere moitie
+      { label: 'EVEN',  type: 'EVEN',  colorBg: 0x14253a }, // PAIRE
       { label: 'RED',   type: 'RED',   colorBg: 0xb00000 }, // ROUGE
       { label: 'BLACK', type: 'BLACK', colorBg: 0x000000 }, // NOIR
-      { label: 'ODD',   type: 'ODD',   colorBg: 0x14253a },
-      { label: '19-36', type: 'HIGH',  colorBg: 0x14253a }
+      { label: 'ODD',   type: 'ODD',   colorBg: 0x14253a }, // IMPAIRE
+      { label: '19-36', type: 'HIGH',  colorBg: 0x14253a } // 2nde moitie
     ];
 
     // Décalage horizontal à droite de la grille
-    const offsetX = 109;
+    const offsetX = 159;
 
     // Hauteur du bouton
     const btnH = 91;
@@ -327,6 +327,34 @@ export class Roulette extends Phaser.Scene {
     // Position de départ
     const startX = tableLeft + tableWidth + offsetX;
     const startY = top + 46;
+
+    // --- Colonne DOZEN (1-12 / 13-24 / 25-36) à gauche de RED/BLACK/etc ---
+    const dozens = [
+      { label: '1-12',  param: 1 },
+      { label: '13-24', param: 2 },
+      { label: '25-36', param: 3 }
+    ];
+
+    // On place les DOZEN à gauche de la colonne quicks, avec un petit espace
+    const dozenBtnW   = 48; // largeur des boutons dozens
+    const dozenBtnH   = 182; // Hauteur des bouton dozens
+    const dozenGapX   = 0; // espace horizontal entre dozen et les quicks (BLACK, RED, ODD, EVEN, 1-18, 19-36)
+    const dozenX      = startX - 71;
+    const dozenStartY = startY + 46; // aligné avec les quicks à droite.
+
+    dozens.forEach((d, i) => {
+      const y = dozenStartY + i * (dozenBtnH + 0); // 6 px d’espace vertical
+
+      this._btn(
+        dozenX,
+        y,
+        d.label,
+        async () => this._placeParamBet('DOZEN', d.param),
+        dozenBtnW,
+        dozenBtnH,
+        16 // fontSize
+      );
+    });
 
     quicks.forEach((q, i) => {
       const y = startY + i * (btnH + spacing);
@@ -359,12 +387,12 @@ export class Roulette extends Phaser.Scene {
         // Boutons pour les douzaines (mises de type DOZEN)
         const dozenLayout = {
           startX: 85,   // X du premier bouton (déplace tout le groupe en X)
-          gapX:   85,   // espace horizontal entre chaque bouton
+          gapX:   -30,   // espace horizontal entre chaque bouton
           y:      24 + 56 + 40, // position Y commune (descendre = augmenter)
           w:      70,   // largeur des boutons
           h:      40     // hauteur des boutons
         };
-
+        /*
         this._btn(
           dozenLayout.startX,
           dozenLayout.y,
@@ -391,7 +419,7 @@ export class Roulette extends Phaser.Scene {
           dozenLayout.w,
           dozenLayout.h
         );
-
+        */
 
   }
 
