@@ -16,6 +16,19 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.*;
 
+/**
+ * Servlet qui gère le jeu de roulette.
+ * <p>
+ * Expose plusieurs endpoints sous /api/roulette/* :
+ * <ul>
+ *   <li>GET  /state : récupérer les mises et le solde ;</li>
+ *   <li>POST /bets  : ajouter une mise ;</li>
+ *   <li>POST /spin  : lancer la roulette ;</li>
+ *   <li>DELETE /bets : annuler les mises et rembourser.</li>
+ * </ul>
+ */
+
+
 @WebServlet(urlPatterns = "/api/roulette/*")
 public class RouletteServlet extends HttpServlet {
 
@@ -27,6 +40,16 @@ public class RouletteServlet extends HttpServlet {
     private final Random rng = new Random();
 
     // ========= Helpers communs =========
+    /**
+     * Récupère l'ID utilisateur à partir de la session.
+     * <p>
+     * Utilise directement l'attribut "userId" si présent, sinon
+     * essaie de retrouver l'utilisateur à partir du username ("user").
+     *
+     * @param req requête HTTP
+     * @return identifiant numérique de l'utilisateur
+     * @throws Exception si la session est absente ou non authentifiée
+     */
 
     private Integer requireUserId(HttpServletRequest req) throws Exception {
         HttpSession s = req.getSession(false);
@@ -47,12 +70,31 @@ public class RouletteServlet extends HttpServlet {
         throw new Exception("unauth");
     }
 
+    /**
+     * Lit le corps de la requête HTTP et le parse en JSON.
+     *
+     * @param req requête HTTP
+     * @return objet JSON (vide si le corps est vide)
+     * @throws IOException en cas d'erreur de lecture
+     */
+
+
     private JsonObject readJson(HttpServletRequest req) throws IOException {
         StringBuilder sb = new StringBuilder();
         try (BufferedReader r = req.getReader()) { String line; while ((line = r.readLine()) != null) sb.append(line); }
         String s = sb.toString().trim();
         return s.isEmpty() ? new JsonObject() : gson.fromJson(s, JsonObject.class);
     }
+
+    /**
+     * Écrit une réponse JSON avec un code HTTP donné.
+     *
+     * @param resp   réponse HTTP
+     * @param status code HTTP (200, 400, 500, etc.)
+     * @param obj    objet JSON à envoyer
+     * @throws IOException si l'écriture dans la réponse échoue
+     */
+
 
     private void writeJson(HttpServletResponse resp, int status, JsonObject obj) throws IOException {
         resp.setStatus(status);
@@ -61,6 +103,15 @@ public class RouletteServlet extends HttpServlet {
         try (PrintWriter w = resp.getWriter()) { w.write(gson.toJson(obj)); }
     }
 
+    /**
+     * Construit un petit objet JSON d'erreur.
+     *
+     * @param code   code d'erreur (ex. "server_error")
+     * @param detail détail optionnel
+     * @return objet JSON contenant les champs "error" et éventuellement "detail"
+     */
+
+
     private JsonObject err(String code, String detail){
         JsonObject o = new JsonObject();
         o.addProperty("error", code);
@@ -68,11 +119,28 @@ public class RouletteServlet extends HttpServlet {
         return o;
     }
 
+    /**
+     * Retourne un message d'erreur "safe" pour être renvoyé au client
+     * (évite les guillemets doubles).
+     *
+     * @param e exception d'origine
+     * @return message nettoyé
+     */
+
+
     private String safeMsg(Throwable e){ String m = e.getMessage(); return (m==null)?e.getClass().getSimpleName():m.replace("\"","'"); }
 
     private int jInt(JsonObject o, String k, int def){ return (o!=null && o.has(k) && o.get(k).isJsonPrimitive()) ? o.get(k).getAsInt() : def; }
     private String jStr(JsonObject o, String k, String def){ return (o!=null && o.has(k) && o.get(k).isJsonPrimitive()) ? o.get(k).getAsString() : def; }
     private Integer jOptInt(JsonObject o, String k){ return (o!=null && o.has(k) && o.get(k).isJsonPrimitive()) ? o.get(k).getAsInt() : null; }
+
+    /**
+     * Convertit la liste de mises de roulette en tableau JSON.
+     *
+     * @param bets liste de mises provenant de la base
+     * @return tableau JSON de mises
+     */
+
 
     private JsonArray toJsonBets(java.util.List<UserDao.RouletteBet> bets){
         JsonArray a = new JsonArray();
@@ -87,6 +155,17 @@ public class RouletteServlet extends HttpServlet {
     }
 
     // ========= GET =========
+
+    /**
+     * Gestion des requêtes GET pour la roulette.
+     * <p>
+     * Actuellement utilisé pour /state : renvoie le solde, les mises
+     * en cours et éventuellement le dernier résultat.
+     *
+     * @param req  requête HTTP
+     * @param resp réponse HTTP JSON
+     * @throws IOException en cas d'erreur d'écriture de la réponse
+     */
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
@@ -122,6 +201,16 @@ public class RouletteServlet extends HttpServlet {
 
     // ========= DELETE (/bets) =========
 
+    /**
+     * Gestion des requêtes DELETE pour la roulette.
+     * <p>
+     * /bets : annule les mises en cours, rembourse et renvoie le nouveau solde.
+     *
+     * @param req  requête HTTP
+     * @param resp réponse HTTP JSON
+     * @throws IOException en cas d'erreur d'écriture de la réponse
+     */
+
     @Override
     protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         String path = req.getPathInfo();
@@ -145,6 +234,21 @@ public class RouletteServlet extends HttpServlet {
     }
 
     // ========= POST =========
+
+    /**
+     * Gestion des requêtes POST pour la roulette.
+     * <p>
+     * Deux chemins principaux :
+     * <ul>
+     *   <li>/bets : pose une nouvelle mise après avoir débité les crédits ;</li>
+     *   <li>/spin : tire un nombre aléatoire (0–36), calcule le gain,
+     *       met à jour le solde et renvoie le résultat.</li>
+     * </ul>
+     *
+     * @param req  requête HTTP (JSON en entrée pour /bets)
+     * @param resp réponse HTTP JSON
+     * @throws IOException en cas d'erreur d'écriture de la réponse
+     */
 
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
@@ -209,6 +313,14 @@ public class RouletteServlet extends HttpServlet {
         }
     }
 
+    /**
+     * Vérifie si une mise est valide en fonction de son type et de son paramètre.
+     *
+     * @param type  type de mise (STRAIGHT, DOZEN, COLUMN, RED, BLACK, etc.)
+     * @param param paramètre associé (numéro, douzaine, colonne), ou null
+     * @return true si la combinaison type/param est autorisée
+     */
+
     private boolean isValidBet(String type, Integer param){
         if (type == null) return false;
         switch (type){
@@ -221,7 +333,17 @@ public class RouletteServlet extends HttpServlet {
         }
     }
 
-    private int computePayout(java.util.List<UserDao.RouletteBet> bets, int n, String color){
+    /**
+     * Calcule le montant total gagné pour une liste de mises
+     * en fonction du numéro tiré et de sa couleur.
+     *
+     * @param bets  liste de mises posées par le joueur
+     * @param n     numéro tiré (0 à 36)
+     * @param color couleur du numéro ("red", "black" ou "green")
+     * @return total des gains (0 si aucune mise gagnante)
+     */
+
+        private int computePayout(java.util.List<UserDao.RouletteBet> bets, int n, String color){
         int total = 0;
         boolean isRed   = "red".equals(color);
         boolean isBlack = "black".equals(color);
