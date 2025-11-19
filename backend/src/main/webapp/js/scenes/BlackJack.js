@@ -882,61 +882,120 @@ export class BlackJack extends Phaser.Scene {
       }
     });
 
+    doubleBtn = makeButtonRect(width * 0.74, height * 0.78, 90, 40, 'Double', async () => {
+      if (this.animating) return;
+      this.errorText.setText('');
+      setButtonEnabled(hitBtn, false);
+      setButtonEnabled(standBtn, false);
+      setButtonEnabled(doubleBtn, false);
 
-        doubleBtn = makeButtonRect(width * 0.74, height * 0.78, 90, 40, 'Double', async () => {
-          if (this.animating) return;
-          this.errorText.setText('');
-          setButtonEnabled(hitBtn, false);
-          setButtonEnabled(standBtn, false);
-          setButtonEnabled(doubleBtn, false);
-          try {
-            const res = await api('api/blackjack/double', { method: 'POST' });
+      try {
+        const res = await api('api/blackjack/double', { method: 'POST' });
 
-            showState(res.state, res.payout);
+        const finalState   = res.state;      // état final (joueur + croupier)
+        const payout       = res.payout;
+        const finalCredits = res.credits;
 
-            this.creditsText.setText(`Crédits : ${res.credits}`);
+        const prevDealer = this.lastDealer || [];
+        const prevPlayer = this.lastPlayer || [];
 
-            this._playing = false;
-            setButtonEnabled(startBtn, true);
+        // On veut d’abord animer UNIQUEMENT la carte du joueur
+        // => on garde l’ancienne main du croupier, on force status="playing"
+        this.roundResultSoundPlayed = false;
 
-            const user = this.registry.get('user') || {};
-            user.credits = res.credits;
-            this.registry.set('user', user);
-            this.game.events.emit('credits:update', res.credits);
+        const playerOnlyState = JSON.parse(JSON.stringify(finalState));
+        playerOnlyState.dealer = prevDealer.slice(); // croupier comme avant
+        playerOnlyState.status = 'playing';          // pas encore de résultat
 
-            playSfx && playSfx(this, 'ui_click');
-          } catch (e) {
-            if (e.status === 409) {
-              this.errorText.setText('Crédits insuffisants pour doubler.');
-            } else if (e.status === 400) {
-              this.errorText.setText('Impossible de doubler maintenant.');
-            } else if (e.status === 401) {
-              this.errorText.setText('Session expirée.');
-              this.scene.start('Login');
-              return;
-            } else {
-              this.errorText.setText('Erreur serveur.');
-            }
-            if (this._playing) {
-              setButtonEnabled(hitBtn, true);
-              setButtonEnabled(standBtn, true);
-            } else {
-              setButtonEnabled(startBtn, true);
-            }
+        // 1) ANIM de la carte du joueur (double)
+        showState(playerOnlyState); // ici, seule la nouvelle carte joueur est animée
+
+        // Fonction appelée à la toute fin (après anim du croupier)
+        const applyEndOfRound = () => {
+          this.creditsText.setText(`Crédits : ${finalCredits}`);
+
+          this._playing = false;
+          setButtonEnabled(startBtn, true);
+
+          const user = this.registry.get('user') || {};
+          user.credits = finalCredits;
+          this.registry.set('user', user);
+          this.game.events.emit('credits:update', finalCredits);
+
+          playSfx && playSfx(this, 'ui_click');
+        };
+
+        // 2) On attend un peu pour laisser le temps à la carte du joueur d’être posée
+        this.time.delayedCall(650, () => {
+          const allDealer = finalState.dealer || [];
+          const extra = allDealer.length - prevDealer.length; // nb de nouvelles cartes croupier
+
+          // Si le croupier n’a rien pioché ou seulement 1 carte -> simple anim
+          if (extra <= 1) {
+            showState(finalState, payout); // animera la carte du croupier si extra === 1
+            applyEndOfRound();
+            return;
           }
-        });
 
+          // Sinon : anim CARTE PAR CARTE comme pour Stand
+          const steps = [];
+          for (let i = 1; i <= extra; i++) {
+            const s = JSON.parse(JSON.stringify(finalState));
+            // premières cartes déjà visibles + i nouvelles
+            s.dealer = allDealer.slice(0, prevDealer.length + i);
 
+            // tant qu’on n’est pas sur la dernière étape, on masque le résultat
+            if (i < extra) {
+              s.status = 'playing';
+            }
+            steps.push(s);
+          }
 
+          let idx = 0;
+          const playNext = () => {
+            const s = steps[idx];
+            const isLast = (idx === steps.length - 1);
 
+            // payout uniquement sur la dernière étape => son win/lose déclenché à la fin
+            showState(s, isLast ? payout : undefined);
 
+            idx++;
+            if (idx < steps.length) {
+              this.time.delayedCall(800, playNext, null, this); // délai entre chaque tirage du croupier
+            } else {
+              applyEndOfRound();
+            }
+          };
 
+          // on lance la séquence du croupier
+          playNext();
+        }, null, this);
 
-     this._playing = false;
-     setButtonEnabled(startBtn, true);
-     setButtonEnabled(hitBtn, false);
-     setButtonEnabled(standBtn, false);
+      } catch (e) {
+        if (e.status === 409) {
+          this.errorText.setText('Crédits insuffisants pour doubler.');
+        } else if (e.status === 400) {
+          this.errorText.setText('Impossible de doubler maintenant.');
+        } else if (e.status === 401) {
+          this.errorText.setText('Session expirée.');
+          this.scene.start('Login');
+          return;
+        } else {
+          this.errorText.setText('Erreur serveur.');
+        }
 
-     setButtonEnabled(doubleBtn, false);
+        if (this._playing) {
+          setButtonEnabled(hitBtn, true);
+          setButtonEnabled(standBtn, true);
+        } else {
+          setButtonEnabled(startBtn, true);
+        }
+      }
+    });
+    this._playing = false;
+    setButtonEnabled(startBtn, true);
+    setButtonEnabled(hitBtn, false);
+    setButtonEnabled(standBtn, false);
+    setButtonEnabled(doubleBtn, false);
   }
 }
