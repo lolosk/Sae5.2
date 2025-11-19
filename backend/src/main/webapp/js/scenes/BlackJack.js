@@ -780,7 +780,7 @@ export class BlackJack extends Phaser.Scene {
       setButtonEnabled(doubleBtn, false);
       try {
         const res = await api('api/blackjack/hit', { method: 'POST' });
-        showState(res.state);
+        showState(res.state, 0);
         if (res.state.status !== 'playing') {
           this._playing = false;
           setButtonEnabled(startBtn, true);
