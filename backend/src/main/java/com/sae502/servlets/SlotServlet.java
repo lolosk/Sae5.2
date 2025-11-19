@@ -14,12 +14,17 @@ import java.io.PrintWriter;
 import java.util.Random;
 
 /**
- * Slot endpoints:
- *  - POST /api/slot/spin   : debit bet, return { grid, credits }
- *  - POST /api/slot/settle : credit payout, return { ok, credits }
- *
- * Front expects grid as an array of 5 columns, each column = [top, mid, bot] with indices 0..9.
+ * Servlet qui gère les endpoints de la machine à sous.
+ * <p>
+ * Slot endpoints :
+ * <ul>
+ *   <li>POST /api/slot/spin   : débite la mise et renvoie { grid, credits } ;</li>
+ *   <li>POST /api/slot/settle : crédite le payout et renvoie { ok, credits }.</li>
+ * </ul>
+ * Le front attend la grille sous la forme d'un tableau de 5 colonnes,
+ * chaque colonne étant [top, mid, bot] avec des indices de symboles 0..9.
  */
+
 @WebServlet(urlPatterns = "/api/slot/*")
 public class SlotServlet extends HttpServlet {
 
@@ -29,6 +34,20 @@ public class SlotServlet extends HttpServlet {
     private static final int SYMBOL_CNT = 10;
 
     private final Random rng = new Random();
+
+    /**
+     * Gère les requêtes POST de la Slot.
+     * <p>
+     * Deux chemins principaux :
+     * <ul>
+     *   <li>"/spin"   : lit la mise, débite en base, génère une grille et renvoie les crédits ;</li>
+     *   <li>"/settle" : crédite le payout envoyé par le front, puis renvoie les crédits.</li>
+     * </ul>
+     *
+     * @param req  requête HTTP (JSON en entrée)
+     * @param resp réponse HTTP (JSON en sortie)
+     * @throws IOException en cas d'erreur d'écriture de la réponse
+     */
 
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
@@ -97,6 +116,14 @@ public class SlotServlet extends HttpServlet {
 
     // --- Helpers -------------------------------------------------------------
 
+    /**
+     * Lit le corps de la requête et le convertit en objet JSON.
+     *
+     * @param req requête HTTP
+     * @return objet JSON (vide si le corps est vide)
+     * @throws IOException en cas d'erreur de lecture
+     */
+
     private JSONObject readJson(HttpServletRequest req) throws IOException {
         StringBuilder sb = new StringBuilder();
         try (BufferedReader r = req.getReader()) {
@@ -107,17 +134,42 @@ public class SlotServlet extends HttpServlet {
         return s.isEmpty() ? new JSONObject() : new JSONObject(s);
     }
 
-    private void writeJson(HttpServletResponse resp, int status, JSONObject obj) throws IOException {
+    /**
+     * Écrit une réponse JSON avec un code HTTP donné.
+     *
+     * @param resp   réponse HTTP
+     * @param status code HTTP (200, 401, 500, etc.)
+     * @param obj    objet JSON à envoyer
+     * @throws IOException si l'écriture dans la réponse échoue
+     */
+
+        private void writeJson(HttpServletResponse resp, int status, JSONObject obj) throws IOException {
         resp.setStatus(status);
         try (PrintWriter w = resp.getWriter()) {
             w.write(obj.toString());
         }
     }
 
+    /**
+     * Retourne un message d'erreur "safe" pour le client,
+     * sans guillemets doubles.
+     *
+     * @param e exception d'origine
+     * @return message nettoyé
+     */
+
     private String safeMsg(Exception e) {
         String m = e.getMessage();
         return (m == null) ? e.getClass().getSimpleName() : m.replace("\"", "'");
     }
+
+    /**
+     * Convertit la grille interne (int[][]) en tableau JSON
+     * au format attendu par le front : 5 colonnes de 3 lignes.
+     *
+     * @param grid grille COLS x ROWS
+     * @return tableau JSON de colonnes
+     */
 
     private JSONArray toJsonGrid(int[][] grid) {
         JSONArray cols = new JSONArray();
@@ -132,11 +184,15 @@ public class SlotServlet extends HttpServlet {
     }
 
     /**
-     * Generates a grid as an array of 5 columns, each = [top, mid, bot].
-     * Here we simply choose a random top, then mid/bot follow the strip order:
-     * mid=(top+1)%N, bot=(top+2)%N, like a continuous reel strip.
-     * Replace with your own generator if you already have one.
+     * Génère une grille de symboles sous forme de tableau COLS x ROWS.
+     * <p>
+     * Pour chaque colonne, on choisit un symbole "top" aléatoire, puis
+     * les symboles "mid" et "bot" sont les suivants dans la bande
+     * (top+1, top+2) modulo SYMBOL_CNT, comme un strip continu de rouleau.
+     *
+     * @return grille de symboles pour un spin
      */
+
     private int[][] generateGrid() {
         int[][] grid = new int[COLS][ROWS];
         for (int c = 0; c < COLS; c++) {
