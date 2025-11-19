@@ -9,6 +9,15 @@ import java.io.IOException;
 import java.sql.SQLException;
 import java.util.*;
 
+
+/**
+ * Servlet qui gère le jeu de Blackjack.
+ * <p>
+ * Expose les endpoints /api/blackjack/start, /hit, /stand et /double
+ * pour jouer une manche côté client (Phaser).
+ */
+
+
 @WebServlet(urlPatterns = {
         "/api/blackjack/start",
         "/api/blackjack/hit",
@@ -16,8 +25,15 @@ import java.util.*;
         "/api/blackjack/double"
 })
 
+
 public class BlackJackServlet extends HttpServlet {
     private final Gson gson = new Gson();
+
+    /**
+     * État d'une manche de Blackjack stocké en session.
+     * Contient le paquet, la main du joueur, la main du croupier,
+     * la mise et le statut de la manche.
+     */
 
     static class BJState {
         Deque<String> deck;          // "AS","10H","KC"... (rank + suit)
@@ -27,6 +43,15 @@ public class BlackJackServlet extends HttpServlet {
         String status = "playing";   // playing | player_bust | dealer_bust | player_win | dealer_win | push
         boolean finished = false;
     }
+    /**
+     * Point d'entrée pour les requêtes POST du Blackjack.
+     * Redirige vers start, hit, stand ou double selon l'URL,
+     * après vérification que l'utilisateur est bien connecté.
+     *
+     * @param req  requête HTTP reçue
+     * @param resp réponse HTTP envoyée (JSON)
+     * @throws IOException en cas d'erreur d'écriture de la réponse
+     */
 
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
@@ -58,6 +83,21 @@ public class BlackJackServlet extends HttpServlet {
             resp.getWriter().write("{\"ok\":false,\"error\":\"server_error\"}");
         }
     }
+
+    /**
+     * Démarre une nouvelle manche de Blackjack.
+     * <p>
+     * Lit la mise dans le corps JSON, vérifie les crédits, débite la mise,
+     * initialise le paquet et les mains, traite le cas d'un Blackjack direct
+     * puis renvoie l'état du jeu et les crédits à jour.
+     *
+     * @param req      requête HTTP contenant la mise (bet)
+     * @param resp     réponse HTTP JSON
+     * @param session  session HTTP (stocke l'état de la manche)
+     * @param username nom d'utilisateur courant
+     * @throws IOException  si la réponse ne peut pas être écrite
+     * @throws SQLException si l'accès à la base échoue
+     */
 
     private void handleStart(HttpServletRequest req, HttpServletResponse resp,
                              HttpSession session, String username)
@@ -152,8 +192,18 @@ public class BlackJackServlet extends HttpServlet {
         resp.getWriter().write(out.toString());
     }
 
-
-
+    /**
+     * Action "Hit" : le joueur pioche une carte.
+     * <p>
+     * Met à jour la main du joueur, recalcule la valeur et
+     * met le statut à player_bust si le joueur dépasse 21.
+     *
+     * @param resp     réponse HTTP JSON
+     * @param session  session contenant l'état de la manche
+     * @param username nom d'utilisateur courant (pour les logs)
+     * @throws IOException  si la réponse ne peut pas être écrite
+     * @throws SQLException si l'écriture des logs échoue
+     */
 
     private void handleHit(HttpServletResponse resp, HttpSession session, String username) throws IOException, SQLException {
         BJState st = (BJState) session.getAttribute("bjState");
@@ -179,6 +229,21 @@ public class BlackJackServlet extends HttpServlet {
         out.addProperty("credits", credits);
         resp.getWriter().write(out.toString());
     }
+
+    /**
+     * Action "Double" : doublement de la mise.
+     * <p>
+     * Vérifie que le joueur a deux cartes et assez de crédits,
+     * débite une deuxième mise, donne une carte au joueur,
+     * fait jouer le croupier puis calcule le résultat final.
+     *
+     * @param resp     réponse HTTP JSON
+     * @param session  session contenant l'état de la manche
+     * @param username nom d'utilisateur courant
+     * @throws IOException  si la réponse ne peut pas être écrite
+     * @throws SQLException si la mise à jour en base échoue
+     */
+
     private void handleDouble(HttpServletResponse resp, HttpSession session, String username) throws IOException, SQLException {
         BJState st = (BJState) session.getAttribute("bjState");
         if (st == null || st.finished) {
@@ -268,6 +333,19 @@ public class BlackJackServlet extends HttpServlet {
         out.addProperty("credits", credits);
         resp.getWriter().write(out.toString());
     }
+    /**
+     * Action "Stand" : le joueur s'arrête.
+     * <p>
+     * Le croupier pioche jusqu'à 17 ou plus, puis le serveur compare
+     * les mains, calcule le payout, met à jour les crédits et renvoie
+     * l'état final de la manche.
+     *
+     * @param resp     réponse HTTP JSON
+     * @param session  session contenant l'état de la manche
+     * @param username nom d'utilisateur courant
+     * @throws IOException  si la réponse ne peut pas être écrite
+     * @throws SQLException si la mise à jour en base échoue
+     */
 
 
     private void handleStand(HttpServletResponse resp, HttpSession session, String username) throws IOException, SQLException {
@@ -324,6 +402,11 @@ public class BlackJackServlet extends HttpServlet {
     }
 
     // --- Utils BJ ---
+    /**
+     * Construit un paquet de 52 cartes et le mélange.
+     *
+     * @return paquet mélangé sous forme de Deque
+     */
 
     private static Deque<String> buildShuffledDeck() {
         String[] ranks = {"A","2","3","4","5","6","7","8","9","10","J","Q","K"};
@@ -346,6 +429,14 @@ public class BlackJackServlet extends HttpServlet {
         return c;
     }
 
+    /**
+     * Calcule la valeur d'une main de Blackjack.
+     * Les As comptent d'abord pour 11 puis passent à 1
+     * si la main dépasse 21.
+     *
+     * @param hand cartes de la main
+     * @return valeur entière de la main
+     */
 
     private static int handValue(List<String> hand) {
         int total = 0, aces = 0;
@@ -384,6 +475,17 @@ public class BlackJackServlet extends HttpServlet {
         for (String s : list) arr.add(s);
         return arr;
     }
+
+    /**
+     * Enregistre un log d'une manche de Blackjack en base
+     * (mains, statut final, payout).
+     *
+     * @param username joueur concerné
+     * @param st       état de la manche
+     * @param payout   gain ou perte finale
+     * @throws SQLException si l'insertion en base échoue
+     */
+
 
     private void logGame(String username, BJState st, int payout) throws SQLException {
         UserDao.UserRow u = UserDao.getByUsername(username);
