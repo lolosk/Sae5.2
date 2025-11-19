@@ -21,9 +21,9 @@ Ce projet simule un mini-casino en ligne avec login, gestion des crédits et plu
 - `feature-*` → nouvelles fonctionnalités
 
 ## 👥 Membres du groupe
-- Alice — Authentification & BDD
-- Bob — Jeux (roulette, machine à sous)
-- Charlie — Frontend & intégration
+- Lois
+- Vincent
+- Kinan
 
 ## 📅 Planning
 Voir le Gantt dans `docs/`.
